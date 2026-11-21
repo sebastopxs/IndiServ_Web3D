@@ -73,7 +73,39 @@ export function mapTelemetryTo3DProfile(telemetry) {
 
   const ramFile = '/models/archetypes/ram_dimm.glb';
   const mbFile = '/models/archetypes/motherboard_atx.glb';
-  const chassisFile = '/models/archetypes/chassis_mid_tower.glb';
+
+  // Tipo de equipo ('laptop' | 'desktop') desde specs_json con inferencia de respaldo para tickets previos
+  const explicitTipo = (
+    telemetry.specs_json?.tipo_equipo ||
+    telemetry.tipo_equipo ||
+    ''
+  )
+    .toString()
+    .trim()
+    .toLowerCase();
+
+  let tipoEquipo = 'desktop';
+  if (explicitTipo === 'laptop' || explicitTipo === 'desktop') {
+    tipoEquipo = explicitTipo;
+  } else {
+    const hwFingerprint = `${telemetry.cpu || ''} ${telemetry.gpu || ''} ${telemetry.placa_base || ''} ${telemetry.ram || ''}`.toLowerCase();
+    const hasMobileSignature =
+      hwFingerprint.includes('laptop') ||
+      hwFingerprint.includes('notebook') ||
+      hwFingerprint.includes('lnvnb') ||
+      hwFingerprint.includes('sodimm') ||
+      hwFingerprint.includes('so-dimm') ||
+      /\b\d{4,5}(?:hs|hx|h|u)\b/i.test(hwFingerprint);
+    if (hasMobileSignature) {
+      tipoEquipo = 'laptop';
+    }
+  }
+
+  const isLaptop = tipoEquipo === 'laptop';
+  const modelFile = isLaptop ? '/models/laptop-opt.glb' : '/models/pc-opt.glb';
+  const chassisFile = isLaptop
+    ? '/models/laptop-opt.glb'
+    : '/models/archetypes/chassis_mid_tower.glb';
 
   const mbDiag = components['Placa Base'] || { specs: telemetry.placa_base || 'Placa Base ATX' };
   const cpuDiag = components['Procesador/Refrigeración'] || { specs: cpuRaw, cooler_type: coolerRaw };
@@ -87,6 +119,8 @@ export function mapTelemetryTo3DProfile(telemetry) {
     scan_date: telemetry.scan_date,
     system_status: telemetry.system_status,
     base_specs: telemetry.base_specs,
+    tipo_equipo: tipoEquipo,
+    model_file: modelFile,
     cpu: telemetry.cpu,
     ram: telemetry.ram,
     gpu: telemetry.gpu,

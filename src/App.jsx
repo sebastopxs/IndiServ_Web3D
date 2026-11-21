@@ -3,7 +3,7 @@ import ChassisScene from './components/ChassisScene';
 import TechSidebar from './components/TechSidebar';
 import { mapTelemetryTo3DProfile } from './utils/hardwareMapper';
 import { supabase } from './supabaseClient';
-import { RotateCcw, Maximize2, Minimize2, EyeOff, Eye, FileDown } from 'lucide-react';
+import { RotateCcw, Maximize2, Minimize2, EyeOff, Eye, FileDown, Laptop, Monitor } from 'lucide-react';
 
 /* ═══════════════════════════════════════════
    Fallback Mock Data (solo cuando NO hay ticket en URL)
@@ -186,7 +186,8 @@ class CanvasErrorBoundary extends React.Component {
 // Memoized ChassisScene to completely decouple 3D rendering from UI state changes
 const MemoizedChassisScene = React.memo(ChassisScene, (prevProps, nextProps) => {
   return prevProps.explodedView === nextProps.explodedView 
-      && prevProps.telemetry === nextProps.telemetry;
+      && prevProps.telemetry === nextProps.telemetry
+      && prevProps.profile === nextProps.profile;
 });
 
 /* ═══════════════════════════════════════════
@@ -211,11 +212,16 @@ export default function App() {
   useEffect(() => {
     (async () => {
       // 1. Extraer el ticket de la URL limpiando espacios
-      const ticketParam = new URLSearchParams(window.location.search).get('ticket')?.trim();
+      const params = new URLSearchParams(window.location.search);
+      const ticketParam = params.get('ticket')?.trim();
+      const tipoParam = params.get('tipo')?.trim()?.toLowerCase();
 
       if (!ticketParam) {
         console.info("Sin parámetro 'ticket' en la URL. Activando snapshot de respaldo.");
-        setTelemetry(FALLBACK);
+        const fallbackData = tipoParam === 'laptop'
+          ? { ...FALLBACK, tipo_equipo: 'laptop', specs_json: { tipo_equipo: 'laptop' } }
+          : FALLBACK;
+        setTelemetry(fallbackData);
         setIsLive(false);
         setStatusMessage('[Offline — Snapshot de respaldo cargado]');
         setLoading(false);
@@ -283,6 +289,19 @@ export default function App() {
     resetCameraFn?.();
   }, [resetCameraFn]);
 
+  const isLaptopModel = profile?.tipo_equipo === 'laptop';
+  const toggleDeviceType = useCallback(() => {
+    setTelemetry((prev) => {
+      if (!prev) return prev;
+      const nextTipo = isLaptopModel ? 'desktop' : 'laptop';
+      return {
+        ...prev,
+        tipo_equipo: nextTipo,
+        specs_json: { ...(prev.specs_json || {}), tipo_equipo: nextTipo },
+      };
+    });
+  }, [isLaptopModel]);
+
   return (
     <div className="w-screen h-screen flex bg-zinc-950 font-sans text-zinc-100 overflow-hidden">
       {/* ── 3D Viewport ── */}
@@ -331,6 +350,13 @@ export default function App() {
 
           {/* Toolbar */}
           <div className="pointer-events-auto flex items-center gap-2 bg-zinc-950/70 backdrop-blur-md border border-white/[0.06] rounded-xl px-2 py-1.5 shadow-lg">
+            <ToolbarBtn
+              icon={isLaptopModel ? Laptop : Monitor}
+              label={isLaptopModel ? 'Modo: Laptop' : 'Modo: PC'}
+              active={isLaptopModel}
+              onClick={toggleDeviceType}
+            />
+            <div className="w-px h-5 bg-white/[0.06]" />
             <ToolbarBtn icon={RotateCcw} label="Restablecer" onClick={resetView} />
             <div className="w-px h-5 bg-white/[0.06]" />
             <ToolbarBtn icon={explodedView ? Minimize2 : Maximize2} label={explodedView ? 'Colapsar' : 'Explosión'} active={explodedView} onClick={() => { setExplodedView((v) => !v); if (!explodedView && showCase) setShowCase(false); }} />

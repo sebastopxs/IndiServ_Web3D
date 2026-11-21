@@ -12,14 +12,62 @@ import HardwarePart from './HardwarePart';
  * - Purely uses the cached useGLTF scene
  */
 
+const DESKTOP_MODEL_PATH = '/models/pc-opt.glb';
+const LAPTOP_MODEL_PATH = '/models/laptop-opt.glb';
+
 const CATEGORY_KEYWORDS = [
-  { category: 'Memoria RAM',             keys: ['ram', 'dimm', 'memory'] },
-  { category: 'Tarjeta Gráfica',         keys: ['gpu', 'graphic', 'video', 'rtx', 'gtx', 'radeon', 'pcie'] },
-  { category: 'Procesador/Refrigeración', keys: ['cpu', 'cooler', 'fan', 'heatsink', 'pump', 'cuper', 'socket'] },
-  { category: 'Placa Base',              keys: ['board', 'mother', 'main', 'motherboard'] },
+  { category: 'Memoria RAM',             keys: ['ram', 'dimm', 'sodimm', 'memory'] },
+  { category: 'Tarjeta Gráfica',         keys: ['gpu', 'graphic', 'video', 'rtx', 'gtx', 'radeon', 'pcie', 'dgpu'] },
+  { category: 'Procesador/Refrigeración', keys: ['cpu', 'cooler', 'fan', 'heatsink', 'heatpipe', 'vapor', 'pump', 'cuper', 'socket'] },
+  { category: 'Placa Base',              keys: ['board', 'mother', 'main', 'motherboard', 'keyboard', 'trackpad', 'hinge', 'screen', 'display'] },
   { category: 'Almacenamiento',          keys: ['ssd', 'hdd', 'disk', 'nvme', 'storage', 'sata', 'm.2'] },
-  { category: 'Fuente de Poder',         keys: ['power', 'psu', 'supply', 'cable', 'wire'] },
+  { category: 'Fuente de Poder',         keys: ['power', 'psu', 'supply', 'cable', 'wire', 'battery', 'bateria', 'adapter'] },
 ];
+
+export function resolveModelPath(profile, telemetry) {
+  if (profile?.model_file) {
+    return profile.model_file;
+  }
+  const rawTipo = (
+    profile?.tipo_equipo ||
+    telemetry?.specs_json?.tipo_equipo ||
+    telemetry?.tipo_equipo ||
+    'desktop'
+  )
+    .toString()
+    .trim()
+    .toLowerCase();
+  return rawTipo === 'laptop' ? LAPTOP_MODEL_PATH : DESKTOP_MODEL_PATH;
+}
+
+class ModelFallbackBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { failedPath: null };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(err) {
+    console.warn(
+      `[HardwareAssembler] No se pudo cargar '${this.props.modelPath}', aplicando fallback seguro a '${DESKTOP_MODEL_PATH}'.`,
+      err?.message || err
+    );
+    this.setState({ failedPath: this.props.modelPath });
+  }
+
+  render() {
+    if (this.state.hasError || this.state.failedPath === this.props.modelPath) {
+      if (this.props.modelPath !== DESKTOP_MODEL_PATH) {
+        return this.props.renderFallback(DESKTOP_MODEL_PATH);
+      }
+      throw new Error(`No se pudo cargar el modelo base ${DESKTOP_MODEL_PATH}`);
+    }
+    return this.props.children;
+  }
+}
 
 function detectCategory(object) {
   let current = object;
@@ -38,12 +86,12 @@ function detectCategory(object) {
   return { category: 'Placa Base', nodeName: object.name || 'node' };
 }
 
-export default function HardwareAssembler({ profile, telemetry, onSelect, explodedView }) {
+function SceneMesh({ modelPath, profile, telemetry, onSelect, explodedView }) {
   // Use the cached scene immutably.
-  const { scene } = useGLTF('/models/pc-opt.glb');
+  const { scene } = useGLTF(modelPath);
 
-  // We do one initial setup to cache original positions for the exploded view.
-  // This runs once and never modifies materials or clones the scene.
+  // One initial setup per loaded scene to cache original positions for the exploded view.
+  // Never modifies materials or clones the scene.
   useMemo(() => {
     scene.traverse((child) => {
       if (child.isMesh) {
@@ -85,19 +133,36 @@ export default function HardwareAssembler({ profile, telemetry, onSelect, explod
         onPointerOver={(e) => { e.stopPropagation(); document.body.style.cursor = 'pointer'; }}
         onPointerOut={(e) => { e.stopPropagation(); document.body.style.cursor = 'auto'; }}
       />
-
-      {/* Archetype overlays if any */}
-      {profile?.parts?.ram?.map((slot, i) => (
-        <HardwarePart
-          key={`ram-${i}`}
-          file={slot.file}
-          position={explodedView ? slot.explodedOffset : slot.position}
-          partData={{ category: 'Memoria RAM', nodeName: `DIMM_${i}`, data: slot.meta }}
-          onSelect={onSelect}
-        />
-      ))}
     </group>
   );
 }
 
-useGLTF.preload('/models/pc-opt.glb');
+export default function HardwareAssembler({ profile, telemetry, onSelect, explodedView }) {
+  const targetModelPath = resolveModelPath(profile, telemetry);
+
+  return (
+    <ModelFallbackBoundary
+      key={targetModelPath}
+      modelPath={targetModelPath}
+      renderFallback={(fallbackPath) => (
+        <SceneMesh
+          modelPath={fallbackPath}
+          profile={profile}
+          telemetry={telemetry}
+          onSelect={onSelect}
+          explodedView={explodedView}
+        />
+      )}
+    >
+      <SceneMesh
+        modelPath={targetModelPath}
+        profile={profile}
+        telemetry={telemetry}
+        onSelect={onSelect}
+        explodedView={explodedView}
+      />
+    </ModelFallbackBoundary>
+  );
+}
+
+useGLTF.preload(DESKTOP_MODEL_PATH);
