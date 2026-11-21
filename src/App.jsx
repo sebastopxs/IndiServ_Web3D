@@ -231,12 +231,23 @@ export default function App() {
       try {
         console.log(`[Supabase] Consultando ticket: "${ticketParam}" en tabla 'reportes_diagnostico'...`);
         
-        // 2. Consulta exacta a 'reportes_diagnostico' por 'id_ticket'
-        const { data, error } = await supabase
+        // 2. Consulta exacta a 'reportes_diagnostico' por 'id_ticket' (con 1 reintento si la subida sigue en curso)
+        let { data, error } = await supabase
           .from('reportes_diagnostico')
           .select('*')
           .eq('id_ticket', ticketParam)
           .single();
+
+        if ((error || !data) && ticketParam) {
+          await new Promise((r) => setTimeout(r, 1200));
+          const retry = await supabase
+            .from('reportes_diagnostico')
+            .select('*')
+            .eq('id_ticket', ticketParam)
+            .single();
+          data = retry.data;
+          error = retry.error;
+        }
 
         // 3. Manejo explícito de error
         if (error) {

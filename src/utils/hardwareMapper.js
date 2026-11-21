@@ -92,10 +92,19 @@ export function mapTelemetryTo3DProfile(telemetry) {
     const hasMobileSignature =
       hwFingerprint.includes('laptop') ||
       hwFingerprint.includes('notebook') ||
+      hwFingerprint.includes('portable') ||
+      hwFingerprint.includes('mobile') ||
       hwFingerprint.includes('lnvnb') ||
+      hwFingerprint.includes('fa506') ||
+      hwFingerprint.includes('fx505') ||
+      hwFingerprint.includes('fx506') ||
+      hwFingerprint.includes('fa507') ||
+      hwFingerprint.includes('gu603') ||
+      hwFingerprint.includes('g513') ||
       hwFingerprint.includes('sodimm') ||
       hwFingerprint.includes('so-dimm') ||
-      /\b\d{4,5}(?:hs|hx|h|u)\b/i.test(hwFingerprint);
+      hwFingerprint.includes('lpddr') ||
+      /\b\d{4,5}(?:hs|hx|h|u|g[1-7])\b/i.test(hwFingerprint);
     if (hasMobileSignature) {
       tipoEquipo = 'laptop';
     }
