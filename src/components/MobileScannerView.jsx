@@ -1,7 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { Device } from '@capacitor/device';
 import { Network } from '@capacitor/network';
-import { Cpu, BatteryCharging, Wifi, Smartphone, MonitorPlay, Play, Square, Activity, RefreshCw } from 'lucide-react';
+import {
+  Cpu, BatteryCharging, Wifi, Smartphone, MonitorPlay, Play, Square,
+  Activity, RefreshCw, HardDrive, MemoryStick, ShieldCheck, Thermometer,
+} from 'lucide-react';
+
+const HardwareInfo = registerPlugin('HardwareInfo');
 
 function detectWebGLGpu() {
   try {
@@ -49,6 +55,19 @@ self.onmessage = function(e) {
 };
 `;
 
+function UsageBar({ pct, color = 'from-cyan-500 to-emerald-400' }) {
+  const safe = Math.max(0, Math.min(100, Number(pct) || 0));
+  const barColor = safe >= 90 ? 'from-rose-500 to-red-400' : safe >= 75 ? 'from-amber-500 to-yellow-400' : color;
+  return (
+    <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden mt-2">
+      <div
+        className={`h-full bg-gradient-to-r ${barColor} transition-all duration-500`}
+        style={{ width: `${safe}%` }}
+      />
+    </div>
+  );
+}
+
 export default function MobileScannerView({ user }) {
   const [info, setInfo] = useState(null);
   const [scanning, setScanning] = useState(true);
@@ -65,6 +84,15 @@ export default function MobileScannerView({ user }) {
   const scanDevice = async () => {
     setScanning(true);
     try {
+      let nativeHw = null;
+      if (Capacitor.isNativePlatform()) {
+        try {
+          nativeHw = await HardwareInfo.getFullHardwareInfo();
+        } catch (err) {
+          console.warn('[HardwareInfo] Fallback a API estándar:', err);
+        }
+      }
+
       let devInfo = { model: 'Dispositivo Móvil', manufacturer: 'Android', operatingSystem: 'android', osVersion: '?' };
       let battInfo = { batteryLevel: null, isCharging: false };
       let netInfo = { connected: navigator.onLine, connectionType: 'wifi' };
@@ -79,7 +107,6 @@ export default function MobileScannerView({ user }) {
         netInfo = await Network.getStatus();
       } catch {}
 
-      // Fallback Web Battery API
       if (battInfo.batteryLevel == null && navigator.getBattery) {
         try {
           const b = await navigator.getBattery();
@@ -87,20 +114,49 @@ export default function MobileScannerView({ user }) {
         } catch {}
       }
 
-      const cores = navigator.hardwareConcurrency || 4;
-      const ramGb = navigator.deviceMemory || null;
       const gpu = detectWebGLGpu();
       const screenRes = `${window.screen.width} × ${window.screen.height} (DPR ${window.devicePixelRatio?.toFixed(1) || 1})`;
 
+      const manufacturer = nativeHw?.manufacturer || devInfo.manufacturer || 'Dispositivo';
+      const brand = nativeHw?.brand || '';
+      const model = nativeHw?.model || devInfo.model || 'Equipo Móvil';
+      const brandPrefix = brand && brand.toLowerCase() !== manufacturer.toLowerCase() ? `${manufacturer} ${brand}` : manufacturer;
+
+      const ramTotalGb = nativeHw?.ramTotalMb ? +(nativeHw.ramTotalMb / 1024).toFixed(1) : (navigator.deviceMemory || null);
+      const ramAvailGb = nativeHw?.ramAvailMb ? +(nativeHw.ramAvailMb / 1024).toFixed(1) : null;
+      const ramUsedGb = ramTotalGb != null && ramAvailGb != null ? +(ramTotalGb - ramAvailGb).toFixed(1) : null;
+
       setInfo({
-        model: devInfo.model || 'Equipo Móvil',
-        manufacturer: devInfo.manufacturer || 'Genérico',
-        os: `${(devInfo.operatingSystem || 'Android').toUpperCase()} ${devInfo.osVersion || ''}`.trim(),
-        platform: devInfo.platform || 'web',
-        cores,
-        ramGb,
-        batteryPct: battInfo.batteryLevel != null ? Math.round(battInfo.batteryLevel * 100) : null,
-        isCharging: Boolean(battInfo.isCharging),
+        isNative: Boolean(nativeHw),
+        displayName: `${brandPrefix} ${model}`.trim(),
+        manufacturer,
+        brand: brand || manufacturer,
+        model,
+        deviceCode: nativeHw?.device || '',
+        board: nativeHw?.board || '',
+        cpuName: nativeHw?.cpuName || `Procesador (${navigator.hardwareConcurrency || 4} hilos)`,
+        cpuCores: nativeHw?.cpuCores || navigator.hardwareConcurrency || 4,
+        cpuMaxFreqMhz: nativeHw?.cpuMaxFreqMhz || 0,
+        cpuArch: nativeHw?.cpuArch || (navigator.userAgent.includes('arm64') || navigator.userAgent.includes('aarch64') ? 'arm64-v8a' : '64-bit'),
+        supportedAbis: nativeHw?.supportedAbis || '',
+        ramTotalGb,
+        ramAvailGb,
+        ramUsedGb,
+        ramUsedPct: nativeHw?.ramUsedPct ?? null,
+        storageTotalGb: nativeHw?.storageTotalGb ?? null,
+        storageAvailGb: nativeHw?.storageAvailGb ?? null,
+        storageUsedGb: nativeHw?.storageUsedGb ?? null,
+        storageUsedPct: nativeHw?.storageUsedPct ?? null,
+        batteryPct: nativeHw?.batteryPct >= 0 ? nativeHw.batteryPct : (battInfo.batteryLevel != null ? Math.round(battInfo.batteryLevel * 100) : null),
+        isCharging: nativeHw?.batteryCharging ?? Boolean(battInfo.isCharging),
+        batteryTempC: nativeHw?.batteryTempC ?? null,
+        batteryVoltageMv: nativeHw?.batteryVoltageMv ?? null,
+        batteryHealth: nativeHw?.batteryHealth || 'Estándar',
+        os: nativeHw?.androidRelease
+          ? `Android ${nativeHw.androidRelease} (API ${nativeHw.sdkInt})`
+          : `${(devInfo.operatingSystem || 'Android').toUpperCase()} ${devInfo.osVersion || ''}`.trim(),
+        securityPatch: nativeHw?.securityPatch || 'N/D',
+        kernelVersion: nativeHw?.kernelVersion || '',
         connected: netInfo.connected,
         netType: (netInfo.connectionType || 'desconocida').toUpperCase(),
         gpu,
@@ -133,7 +189,7 @@ export default function MobileScannerView({ user }) {
   const startStress = () => {
     stopStress();
     const durationSec = 8;
-    const nWorkers = Math.max(2, Math.min(navigator.hardwareConcurrency || 4, 16));
+    const nWorkers = Math.max(2, Math.min(info?.cpuCores || navigator.hardwareConcurrency || 4, 16));
     const blob = new Blob([WORKER_SCRIPT], { type: 'application/javascript' });
     const url = URL.createObjectURL(blob);
 
@@ -147,8 +203,8 @@ export default function MobileScannerView({ user }) {
     setStressMops(0);
     setStressStatus('CARGANDO ~90%');
     setStressLogs([
-      `[INICIO] ${nWorkers} Web Workers activos en paralelo · ${durationSec} s`,
-      `[CPU] ${info?.manufacturer || ''} ${info?.model || 'SoC Móvil'} (${nWorkers} hilos lógicos)`,
+      `[CPU] ${info?.cpuName || 'SoC Móvil'} · ${info?.cpuArch || 'ARM64'} (${nWorkers} hilos)`,
+      `[INICIO] ${nWorkers} Web Workers en paralelo · ${durationSec} s`,
     ]);
 
     for (let i = 0; i < nWorkers; i++) {
@@ -193,78 +249,150 @@ export default function MobileScannerView({ user }) {
 
   return (
     <div className="h-full w-full overflow-y-auto bg-[#0b0f19] text-zinc-100 p-4 pb-24">
-      <div className="max-w-2xl mx-auto space-y-4">
-        {/* Header */}
+      <div className="max-w-2xl mx-auto space-y-3.5">
+        {/* Header Identidad del Modelo */}
         <div className="flex items-center justify-between bg-[#131c2e] border border-slate-800 rounded-2xl p-4">
-          <div>
-            <p className="text-[10px] uppercase tracking-widest text-cyan-400 font-semibold">
-              Escáner de Dispositivo Móvil
-            </p>
-            <h2 className="text-base font-semibold text-white">
-              {info ? `${info.manufacturer} ${info.model}` : 'Analizando hardware…'}
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] uppercase tracking-widest text-cyan-400 font-semibold">
+                {info?.isNative ? 'Telemetría Nativa Android' : 'Escáner de Dispositivo'}
+              </span>
+              {info?.cpuArch && (
+                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">
+                  {info.cpuArch}
+                </span>
+              )}
+            </div>
+            <h2 className="text-base font-bold text-white truncate mt-0.5">
+              {info ? info.displayName : 'Analizando hardware…'}
             </h2>
-            {user && (
-              <p className="text-[11px] text-slate-400 mt-0.5">
-                Operador: <span className="text-emerald-400">{user.nickname}</span> ({user.dni})
+            {info && (
+              <p className="text-[11px] text-slate-400 mt-0.5 truncate">
+                {info.os}
+                {info.board ? ` · Board: ${info.board}` : ''}
+                {user ? ` · Op: ${user.nickname}` : ''}
               </p>
             )}
           </div>
           <button
             onClick={scanDevice}
             disabled={scanning}
-            className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-400 transition-colors"
+            className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-400 transition-colors shrink-0 ml-2"
             title="Reescanear"
           >
             <RefreshCw className={`w-4 h-4 ${scanning ? 'animate-spin' : ''}`} />
           </button>
         </div>
 
-        {/* Telemetry Grid */}
+        {/* Telemetría Profunda */}
         {info && (
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-[#131c2e] border border-slate-800 rounded-xl p-3.5">
-              <div className="flex items-center gap-2 text-cyan-400 text-[10px] font-semibold uppercase">
-                <Cpu className="w-3.5 h-3.5" /> Procesador
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* Procesador (SoC) y Arquitectura */}
+            <div className="sm:col-span-2 bg-[#131c2e] border border-slate-800 rounded-xl p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-cyan-400 text-[10px] font-semibold uppercase">
+                  <Cpu className="w-3.5 h-3.5" /> Procesador (SoC) &amp; Arquitectura
+                </div>
+                <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded">
+                  {info.cpuCores} Núcleos{info.cpuMaxFreqMhz ? ` @ ${(info.cpuMaxFreqMhz / 1000).toFixed(2)} GHz` : ''}
+                </span>
               </div>
-              <p className="text-lg font-bold text-white mt-1">{info.cores} Hilos</p>
-              <p className="text-[11px] text-slate-400">{info.os}</p>
+              <p className="text-sm font-bold text-white mt-1.5">{info.cpuName}</p>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-400 mt-1.5 font-mono">
+                <span>ABI: <strong className="text-slate-200">{info.cpuArch}</strong></span>
+                {info.supportedAbis && <span>Soportadas: {info.supportedAbis}</span>}
+                {info.deviceCode && <span>Código: {info.deviceCode}</span>}
+              </div>
             </div>
 
+            {/* Memoria RAM Real */}
             <div className="bg-[#131c2e] border border-slate-800 rounded-xl p-3.5">
-              <div className="flex items-center gap-2 text-emerald-400 text-[10px] font-semibold uppercase">
-                <BatteryCharging className="w-3.5 h-3.5" /> Batería
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-emerald-400 text-[10px] font-semibold uppercase">
+                  <MemoryStick className="w-3.5 h-3.5" /> Memoria RAM
+                </div>
+                {info.ramUsedPct != null && (
+                  <span className="text-[10px] font-mono text-slate-300">{info.ramUsedPct}% uso</span>
+                )}
+              </div>
+              <p className="text-lg font-bold text-white mt-1">
+                {info.ramTotalGb != null ? `${info.ramTotalGb} GB Total` : 'N/D'}
+              </p>
+              <p className="text-[11px] text-slate-400">
+                {info.ramAvailGb != null
+                  ? `Libre: ${info.ramAvailGb} GB · Usada: ${info.ramUsedGb} GB`
+                  : 'RAM aproximada por WebView'}
+              </p>
+              {info.ramUsedPct != null && <UsageBar pct={info.ramUsedPct} />}
+            </div>
+
+            {/* Almacenamiento Interno Real */}
+            <div className="bg-[#131c2e] border border-slate-800 rounded-xl p-3.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-amber-400 text-[10px] font-semibold uppercase">
+                  <HardDrive className="w-3.5 h-3.5" /> Almacenamiento Interno
+                </div>
+                {info.storageUsedPct != null && (
+                  <span className="text-[10px] font-mono text-slate-300">{info.storageUsedPct}% uso</span>
+                )}
+              </div>
+              <p className="text-lg font-bold text-white mt-1">
+                {info.storageTotalGb != null ? `${info.storageTotalGb} GB` : 'Solo en APK nativo'}
+              </p>
+              <p className="text-[11px] text-slate-400">
+                {info.storageAvailGb != null
+                  ? `Libre: ${info.storageAvailGb} GB · Usado: ${info.storageUsedGb} GB`
+                  : 'Instale el APK para lectura StatFs'}
+              </p>
+              {info.storageUsedPct != null && <UsageBar pct={info.storageUsedPct} color="from-amber-500 to-emerald-400" />}
+            </div>
+
+            {/* Batería, Temperatura y Salud */}
+            <div className="bg-[#131c2e] border border-slate-800 rounded-xl p-3.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-yellow-400 text-[10px] font-semibold uppercase">
+                  <BatteryCharging className="w-3.5 h-3.5" /> Batería &amp; Térmica
+                </div>
+                <span className="text-[10px] text-emerald-400 font-medium">{info.batteryHealth}</span>
               </div>
               <p className="text-lg font-bold text-white mt-1">
                 {info.batteryPct != null ? `${info.batteryPct}%` : 'N/D'}
+                {info.batteryTempC != null && (
+                  <span className="text-xs font-mono text-amber-300 ml-2 inline-flex items-center gap-0.5">
+                    <Thermometer className="w-3 h-3" /> {info.batteryTempC}°C
+                  </span>
+                )}
               </p>
               <p className="text-[11px] text-slate-400">
                 {info.isCharging ? 'Cargando energía' : 'En batería'}
+                {info.batteryVoltageMv ? ` · ${(info.batteryVoltageMv / 1000).toFixed(2)} V` : ''}
               </p>
             </div>
 
+            {/* Red & Sistema */}
             <div className="bg-[#131c2e] border border-slate-800 rounded-xl p-3.5">
               <div className="flex items-center gap-2 text-violet-400 text-[10px] font-semibold uppercase">
-                <Smartphone className="w-3.5 h-3.5" /> Memoria & Pantalla
-              </div>
-              <p className="text-sm font-bold text-white mt-1">
-                {info.ramGb ? `~${info.ramGb} GB RAM` : 'RAM protegida por SO'}
-              </p>
-              <p className="text-[11px] text-slate-400 truncate">{info.screenRes}</p>
-            </div>
-
-            <div className="bg-[#131c2e] border border-slate-800 rounded-xl p-3.5">
-              <div className="flex items-center gap-2 text-amber-400 text-[10px] font-semibold uppercase">
-                <Wifi className="w-3.5 h-3.5" /> Conectividad
+                <Wifi className="w-3.5 h-3.5" /> Red &amp; Seguridad SO
               </div>
               <p className="text-sm font-bold text-white mt-1">
                 {info.connected ? `En Línea (${info.netType})` : 'Sin Conexión'}
               </p>
-              <p className="text-[11px] text-slate-400">Supabase Cloud Ready</p>
+              <p className="text-[11px] text-slate-400 truncate">
+                Parche: {info.securityPatch} · {info.screenRes}
+              </p>
             </div>
 
-            <div className="col-span-2 bg-[#131c2e] border border-slate-800 rounded-xl p-3.5">
-              <div className="flex items-center gap-2 text-blue-400 text-[10px] font-semibold uppercase">
-                <MonitorPlay className="w-3.5 h-3.5" /> Acelerador Gráfico (GPU WebGL)
+            {/* GPU WebGL */}
+            <div className="sm:col-span-2 bg-[#131c2e] border border-slate-800 rounded-xl p-3.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-blue-400 text-[10px] font-semibold uppercase">
+                  <MonitorPlay className="w-3.5 h-3.5" /> Acelerador Gráfico (GPU)
+                </div>
+                {info.kernelVersion && (
+                  <span className="text-[10px] font-mono text-slate-500 truncate max-w-[180px]">
+                    Kernel {info.kernelVersion}
+                  </span>
+                )}
               </div>
               <p className="text-xs font-mono text-slate-200 mt-1 break-words">{info.gpu}</p>
             </div>
@@ -298,7 +426,7 @@ export default function MobileScannerView({ user }) {
           <div className="bg-[#0b0f19] border border-slate-800 rounded-xl p-3 h-36 overflow-y-auto font-mono text-[11px] text-slate-300 space-y-1">
             {stressLogs.length === 0 ? (
               <p className="text-slate-500">
-                Pulse "Iniciar Stress Test" para probar todos los núcleos del dispositivo usando Web Workers sin congelar la interfaz.
+                Pulse "Iniciar Stress Test" para probar todos los núcleos del procesador ({info?.cpuName || 'SoC'}) con Web Workers sin congelar la interfaz.
               </p>
             ) : (
               stressLogs.map((l, idx) => <div key={idx}>{l}</div>)
