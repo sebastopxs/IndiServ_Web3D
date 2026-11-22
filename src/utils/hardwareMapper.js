@@ -74,7 +74,7 @@ export function mapTelemetryTo3DProfile(telemetry) {
   const ramFile = '/models/archetypes/ram_dimm.glb';
   const mbFile = '/models/archetypes/motherboard_atx.glb';
 
-  // Tipo de equipo ('laptop' | 'desktop') desde specs_json con inferencia de respaldo para tickets previos
+  // Tipo de equipo ('phone' | 'laptop' | 'desktop') desde specs_json con inferencia de respaldo para tickets previos
   const explicitTipo = (
     telemetry.specs_json?.tipo_equipo ||
     telemetry.tipo_equipo ||
@@ -85,10 +85,28 @@ export function mapTelemetryTo3DProfile(telemetry) {
     .toLowerCase();
 
   let tipoEquipo = 'desktop';
-  if (explicitTipo === 'laptop' || explicitTipo === 'desktop') {
+  if (explicitTipo === 'phone' || explicitTipo === 'smartphone' || explicitTipo === 'mobile') {
+    tipoEquipo = 'phone';
+  } else if (explicitTipo === 'laptop' || explicitTipo === 'desktop') {
     tipoEquipo = explicitTipo;
   } else {
-    const hwFingerprint = `${telemetry.cpu || ''} ${telemetry.gpu || ''} ${telemetry.placa_base || ''} ${telemetry.ram || ''}`.toLowerCase();
+    const hwFingerprint = `${telemetry.cpu || ''} ${telemetry.gpu || ''} ${telemetry.placa_base || ''} ${telemetry.ram || ''} ${telemetry.almacenamiento || ''}`.toLowerCase();
+    const hasPhoneSignature =
+      hwFingerprint.includes('android') ||
+      hwFingerprint.includes('snapdragon') ||
+      hwFingerprint.includes('adreno') ||
+      hwFingerprint.includes('mali-') ||
+      hwFingerprint.includes('dimensity') ||
+      hwFingerprint.includes('exynos') ||
+      hwFingerprint.includes('kirin') ||
+      hwFingerprint.includes('tensor') ||
+      hwFingerprint.includes('sm-s') ||
+      hwFingerprint.includes('sm-a') ||
+      hwFingerprint.includes('redmi') ||
+      hwFingerprint.includes('poco') ||
+      hwFingerprint.includes('arm64-v8a') ||
+      /\bufs\s*[234]\./i.test(hwFingerprint);
+
     const hasMobileSignature =
       hwFingerprint.includes('laptop') ||
       hwFingerprint.includes('notebook') ||
@@ -105,14 +123,24 @@ export function mapTelemetryTo3DProfile(telemetry) {
       hwFingerprint.includes('so-dimm') ||
       hwFingerprint.includes('lpddr') ||
       /\b\d{4,5}(?:hs|hx|h|u|g[1-7])\b/i.test(hwFingerprint);
-    if (hasMobileSignature) {
+
+    if (hasPhoneSignature) {
+      tipoEquipo = 'phone';
+    } else if (hasMobileSignature) {
       tipoEquipo = 'laptop';
     }
   }
 
+  const isPhone = tipoEquipo === 'phone';
   const isLaptop = tipoEquipo === 'laptop';
-  const modelFile = isLaptop ? '/models/laptop-opt.glb' : '/models/pc-opt.glb';
-  const chassisFile = isLaptop
+  const modelFile = isPhone
+    ? '/models/phone-opt.glb'
+    : isLaptop
+    ? '/models/laptop-opt.glb'
+    : '/models/pc-opt.glb';
+  const chassisFile = isPhone
+    ? '/models/phone-opt.glb'
+    : isLaptop
     ? '/models/laptop-opt.glb'
     : '/models/archetypes/chassis_mid_tower.glb';
 

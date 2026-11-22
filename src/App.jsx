@@ -4,12 +4,13 @@ import ChassisScene from './components/ChassisScene';
 import TechSidebar from './components/TechSidebar';
 import MobileAuthView from './components/MobileAuthView';
 import MobileScannerView from './components/MobileScannerView';
+import MobileDiagnosticView from './components/MobileDiagnosticView';
 import TicketLookupBar from './components/TicketLookupBar';
 import { mapTelemetryTo3DProfile } from './utils/hardwareMapper';
 import { supabase } from './supabaseClient';
 import {
   RotateCcw, Maximize2, Minimize2, EyeOff, Eye, FileDown, Laptop, Monitor,
-  Box, Search, Smartphone, LogOut,
+  Box, Search, Smartphone, LogOut, Stethoscope,
 } from 'lucide-react';
 
 /* ═══════════════════════════════════════════
@@ -218,6 +219,7 @@ export default function App() {
   const [authUser, setAuthUser] = useState(null);
   const [guestUnlocked, setGuestUnlocked] = useState(!isNativeApp || Boolean(initialTicketParam));
   const [activeTab, setActiveTab] = useState(isNativeApp && !initialTicketParam ? 'scanner' : '3d');
+  const [mobileDeviceInfo, setMobileDeviceInfo] = useState(null);
 
   const [telemetry, setTelemetry] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -239,9 +241,11 @@ export default function App() {
     setSelectedComponent(null);
 
     if (!ticketParam) {
-      const fallbackData = tipoParam === 'laptop'
-        ? { ...FALLBACK, tipo_equipo: 'laptop', specs_json: { tipo_equipo: 'laptop' } }
-        : FALLBACK;
+      const normalizedTipo = tipoParam === 'phone' || tipoParam === 'laptop' ? tipoParam : 'desktop';
+      const fallbackData =
+        normalizedTipo !== 'desktop'
+          ? { ...FALLBACK, tipo_equipo: normalizedTipo, specs_json: { tipo_equipo: normalizedTipo } }
+          : FALLBACK;
       setTelemetry(fallbackData);
       setIsLive(false);
       setStatusMessage('[Offline — Snapshot de respaldo cargado]');
@@ -300,6 +304,80 @@ export default function App() {
     await loadTicketById(idTicket);
   }, [loadTicketById]);
 
+  const handleOpenPhone3D = useCallback(({
+    deviceInfo,
+    ticketId,
+    healthScore = 92,
+    diagnostico,
+    solucion,
+    affectedComponent = null,
+  } = {}) => {
+    const dev = deviceInfo || mobileDeviceInfo;
+    const battText = dev?.batteryPct != null
+      ? `${dev.batteryPct}% (${dev.batteryHealth || 'Estándar'}${dev.batteryTempC != null ? ` · ${dev.batteryTempC}°C` : ''}${dev.batteryVoltageMv ? ` · ${(dev.batteryVoltageMv / 1000).toFixed(2)}V` : ''})`
+      : 'Batería Li-ion Smartphone';
+    const cpuText = dev?.cpuName
+      ? `${dev.cpuName} (${dev.cpuCores || 8} núcleos · ${dev.cpuArch || 'arm64-v8a'})`
+      : 'SoC Móvil ARM64';
+    const ramText = dev?.ramTotalGb
+      ? `${dev.ramTotalGb} GB LPDDR (${dev.ramUsedPct ?? 0}% uso)`
+      : 'RAM Móvil LPDDR';
+    const storageText = dev?.storageTotalGb
+      ? `${dev.storageTotalGb} GB UFS (${dev.storageAvailGb ?? '?'} GB libres)`
+      : 'Almacenamiento Interno UFS';
+    const gpuText = dev?.gpu || 'GPU Móvil Integrada';
+    const boardText = dev?.displayName
+      ? `${dev.displayName}${dev.board ? ` · Board ${dev.board}` : ''}`
+      : 'Placa Lógica Smartphone';
+
+    const diagFinal = diagnostico || `Telemetría en vivo de ${dev?.displayName || 'Smartphone Android'} (${dev?.os || 'Android'}).`;
+    const solFinal = solucion || 'Hardware móvil operando dentro de parámetros nominales. Toca cada pieza del teléfono 3D para inspeccionarla.';
+
+    const makeComp = (key, specs, defaultDiag, defaultRec) => ({
+      specs,
+      diagnostic: affectedComponent === key ? diagFinal : defaultDiag,
+      recommendation: affectedComponent === key ? solFinal : defaultRec,
+    });
+
+    const phoneTelemetry = {
+      id_ticket: ticketId || 'TEL-EN-VIVO',
+      ticket_id: ticketId || 'TEL-EN-VIVO',
+      scan_date: new Date().toLocaleDateString('es-ES', { year: 'numeric', month: '2-digit', day: '2-digit' }),
+      system_status: healthScore >= 80 ? 'Certificación Óptima' : 'Requiere Atención',
+      health_score: healthScore,
+      tipo_equipo: 'phone',
+      specs_json: { tipo_equipo: 'phone' },
+      cpu: cpuText,
+      ram: ramText,
+      gpu: gpuText,
+      almacenamiento: storageText,
+      placa_base: boardText,
+      refrigeracion: battText,
+      diagnostico: diagFinal,
+      solucion: solFinal,
+      base_specs: `${cpuText} · ${ramText} · ${storageText}`,
+      components: {
+        'Procesador/Refrigeración': makeComp('Procesador/Refrigeración', cpuText, 'Frecuencia y operación del SoC móvil en rangos estables.', 'Ejecuta el Micro-Stress Test para validar estabilidad térmica.'),
+        'Tarjeta Gráfica': makeComp('Tarjeta Gráfica', `${gpuText}${dev?.screenRes ? ` · ${dev.screenRes}` : ''}`, 'Acelerador gráfico móvil y pantalla operativos.', 'Mantén Android System WebView actualizado.'),
+        'Memoria RAM': makeComp('Memoria RAM', ramText, 'Memoria LPDDR disponible sin presión crítica.', 'Evita apps pesadas residentes si el uso supera el 85%.'),
+        'Placa Base': makeComp('Placa Base', `${boardText} · ${dev?.os || 'Android'}`, `Parche ${dev?.securityPatch || 'N/D'} · Boot: ${dev?.verifiedBootState || 'unknown'}.`, 'Usa la Auditoría IA para comprobar integridad del firmware.'),
+        'Almacenamiento': makeComp('Almacenamiento', storageText, 'Partición interna accesible.', 'Mantén al menos 15% libre para preservar velocidad UFS.'),
+        'Fuente de Poder': makeComp('Fuente de Poder', `${battText} · ${dev?.batteryPlugged || 'Desconectado'}`, `Tecnología ${dev?.batteryTechnology || 'Li-ion'} · Estado: ${dev?.batteryStatusText || 'En uso'}.`, 'Evita cargas frecuentes por encima de 40°C para prolongar la celda.'),
+      },
+    };
+
+    setTelemetry(phoneTelemetry);
+    setIsLive(true);
+    setStatusMessage(null);
+    setLoading(false);
+    setSelectedComponent(
+      affectedComponent
+        ? { category: affectedComponent, nodeName: affectedComponent, data: phoneTelemetry.components[affectedComponent] }
+        : null
+    );
+    setActiveTab('3d');
+  }, [mobileDeviceInfo]);
+
   const handleSelect = useCallback((comp) => {
     setSelectedComponent(comp);
   }, []);
@@ -319,18 +397,23 @@ export default function App() {
     resetCameraFn?.();
   }, [resetCameraFn]);
 
-  const isLaptopModel = profile?.tipo_equipo === 'laptop';
+  const currentDeviceType = profile?.tipo_equipo || 'desktop';
   const toggleDeviceType = useCallback(() => {
     setTelemetry((prev) => {
       if (!prev) return prev;
-      const nextTipo = isLaptopModel ? 'desktop' : 'laptop';
+      const nextTipo =
+        currentDeviceType === 'desktop'
+          ? 'laptop'
+          : currentDeviceType === 'laptop'
+          ? 'phone'
+          : 'desktop';
       return {
         ...prev,
         tipo_equipo: nextTipo,
         specs_json: { ...(prev.specs_json || {}), tipo_equipo: nextTipo },
       };
     });
-  }, [isLaptopModel]);
+  }, [currentDeviceType]);
 
   // Pantalla de Login/Registro en APK Android nativo (cuando aún no inicia sesión)
   if (!guestUnlocked && !authUser) {
@@ -352,7 +435,20 @@ export default function App() {
     <div className="w-screen h-screen flex flex-col md:flex-row bg-zinc-950 font-sans text-zinc-100 overflow-hidden relative">
       {activeTab === 'scanner' ? (
         <div className="flex-1 overflow-hidden">
-          <MobileScannerView user={authUser} />
+          <MobileScannerView
+            user={authUser}
+            onDeviceScanned={setMobileDeviceInfo}
+            onOpenPhone3D={handleOpenPhone3D}
+            onOpenDiagnostic={() => setActiveTab('diagnostic')}
+          />
+        </div>
+      ) : activeTab === 'diagnostic' ? (
+        <div className="flex-1 overflow-hidden">
+          <MobileDiagnosticView
+            deviceInfo={mobileDeviceInfo}
+            user={authUser}
+            onOpenPhone3D={handleOpenPhone3D}
+          />
         </div>
       ) : activeTab === 'tickets' ? (
         <div className="flex-1 overflow-hidden">
@@ -411,9 +507,21 @@ export default function App() {
               {/* Toolbar */}
               <div className="pointer-events-auto flex items-center gap-1.5 bg-zinc-950/75 backdrop-blur-md border border-white/[0.06] rounded-xl px-2 py-1.5 shadow-lg">
                 <ToolbarBtn
-                  icon={isLaptopModel ? Laptop : Monitor}
-                  label={isLaptopModel ? 'Modo: Laptop' : 'Modo: PC'}
-                  active={isLaptopModel}
+                  icon={
+                    currentDeviceType === 'phone'
+                      ? Smartphone
+                      : currentDeviceType === 'laptop'
+                      ? Laptop
+                      : Monitor
+                  }
+                  label={
+                    currentDeviceType === 'phone'
+                      ? 'Modo: Teléfono'
+                      : currentDeviceType === 'laptop'
+                      ? 'Modo: Laptop'
+                      : 'Modo: PC'
+                  }
+                  active={currentDeviceType !== 'desktop'}
                   onClick={toggleDeviceType}
                 />
                 <div className="w-px h-5 bg-white/[0.06]" />
@@ -440,10 +548,22 @@ export default function App() {
 
       {/* ── Barra de Navegación Inferior (Visible en Móvil / Android App) ── */}
       {(isNativeApp || !initialTicketParam) && (
-        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-[#0f172a]/95 backdrop-blur-xl border-t border-white/10 px-2 py-2 flex items-center justify-around">
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-[#0f172a]/95 backdrop-blur-xl border-t border-white/10 px-1.5 py-2 flex items-center justify-around">
           <MobileNavBtn icon={Smartphone} label="Mi Android" active={activeTab === 'scanner'} onClick={() => setActiveTab('scanner')} />
+          <MobileNavBtn icon={Stethoscope} label="Diagnóstico" active={activeTab === 'diagnostic'} onClick={() => setActiveTab('diagnostic')} />
           <MobileNavBtn icon={Search} label="Tickets" active={activeTab === 'tickets'} onClick={() => setActiveTab('tickets')} />
-          <MobileNavBtn icon={Box} label="Visor 3D" active={activeTab === '3d'} onClick={() => setActiveTab('3d')} />
+          <MobileNavBtn
+            icon={Box}
+            label="Visor 3D"
+            active={activeTab === '3d'}
+            onClick={() => {
+              if (mobileDeviceInfo && (!telemetry || telemetry.id_ticket === 'TKT-DEMO-OFFLINE')) {
+                handleOpenPhone3D({ deviceInfo: mobileDeviceInfo });
+              } else {
+                setActiveTab('3d');
+              }
+            }}
+          />
           {isNativeApp && (
             <MobileNavBtn
               icon={LogOut}

@@ -131,6 +131,34 @@ public class HardwareInfoPlugin extends Plugin {
         }
     }
 
+    private String mapBatteryPlugged(int plugged) {
+        switch (plugged) {
+            case BatteryManager.BATTERY_PLUGGED_AC:
+                return "Cargador AC";
+            case BatteryManager.BATTERY_PLUGGED_USB:
+                return "Puerto USB";
+            case BatteryManager.BATTERY_PLUGGED_WIRELESS:
+                return "Carga Inalámbrica";
+            default:
+                return "Desconectado";
+        }
+    }
+
+    private String mapBatteryStatus(int status) {
+        switch (status) {
+            case BatteryManager.BATTERY_STATUS_CHARGING:
+                return "Cargando";
+            case BatteryManager.BATTERY_STATUS_FULL:
+                return "Carga Completa";
+            case BatteryManager.BATTERY_STATUS_DISCHARGING:
+                return "Descargando";
+            case BatteryManager.BATTERY_STATUS_NOT_CHARGING:
+                return "No cargando";
+            default:
+                return "En uso";
+        }
+    }
+
     @PluginMethod
     public void getFullHardwareInfo(PluginCall call) {
         Context ctx = getContext();
@@ -218,7 +246,7 @@ public class HardwareInfoPlugin extends Plugin {
         } catch (Exception ignored) {
         }
 
-        // 5. Batería Real, Temperatura y Voltaje
+        // 5. Batería Real, Temperatura, Voltaje, Tecnología, Fuente y Corriente
         try {
             IntentFilter ifilter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
             Intent batteryStatus = ctx.registerReceiver(null, ifilter);
@@ -226,18 +254,37 @@ public class HardwareInfoPlugin extends Plugin {
                 int level = batteryStatus.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
                 int scale = batteryStatus.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
                 int status = batteryStatus.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
+                int plugged = batteryStatus.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0);
                 int tempTenths = batteryStatus.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0);
                 int voltage = batteryStatus.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 0);
                 int health = batteryStatus.getIntExtra(BatteryManager.EXTRA_HEALTH, BatteryManager.BATTERY_HEALTH_UNKNOWN);
+                String tech = batteryStatus.getStringExtra(BatteryManager.EXTRA_TECHNOLOGY);
 
                 int pct = (level >= 0 && scale > 0) ? Math.round((level * 100f) / scale) : -1;
                 boolean charging = (status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL);
 
                 ret.put("batteryPct", pct);
                 ret.put("batteryCharging", charging);
+                ret.put("batteryStatusText", mapBatteryStatus(status));
+                ret.put("batteryPlugged", mapBatteryPlugged(plugged));
+                ret.put("batteryTechnology", (tech != null && !tech.isEmpty()) ? tech : "Li-ion");
                 ret.put("batteryTempC", Math.round((tempTenths / 10.0) * 10.0) / 10.0);
                 ret.put("batteryVoltageMv", voltage);
                 ret.put("batteryHealth", mapBatteryHealth(health));
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    BatteryManager bm = (BatteryManager) ctx.getSystemService(Context.BATTERY_SERVICE);
+                    if (bm != null) {
+                        int currentUa = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW);
+                        if (currentUa != Integer.MIN_VALUE && currentUa != 0) {
+                            ret.put("batteryCurrentMa", Math.round(currentUa / 1000f));
+                        }
+                        int chargeCounterUah = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER);
+                        if (chargeCounterUah > 0) {
+                            ret.put("batteryChargeCounterMah", Math.round(chargeCounterUah / 1000f));
+                        }
+                    }
+                }
             }
         } catch (Exception ignored) {
         }

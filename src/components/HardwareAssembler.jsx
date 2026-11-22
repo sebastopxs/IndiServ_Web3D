@@ -14,14 +14,15 @@ import HardwarePart from './HardwarePart';
 
 const DESKTOP_MODEL_PATH = '/models/pc-opt.glb';
 const LAPTOP_MODEL_PATH = '/models/laptop-opt.glb';
+const PHONE_MODEL_PATH = '/models/phone-opt.glb';
 
 const CATEGORY_KEYWORDS = [
-  { category: 'Memoria RAM',             keys: ['ram', 'dimm', 'sodimm', 'memory'] },
-  { category: 'Tarjeta Gráfica',         keys: ['gpu', 'graphic', 'video', 'rtx', 'gtx', 'radeon', 'pcie', 'dgpu'] },
-  { category: 'Procesador/Refrigeración', keys: ['cpu', 'cooler', 'fan', 'heatsink', 'heatpipe', 'vapor', 'pump', 'cuper', 'socket'] },
-  { category: 'Placa Base',              keys: ['board', 'mother', 'main', 'motherboard', 'keyboard', 'trackpad', 'hinge', 'screen', 'display'] },
-  { category: 'Almacenamiento',          keys: ['ssd', 'hdd', 'disk', 'nvme', 'storage', 'sata', 'm.2'] },
-  { category: 'Fuente de Poder',         keys: ['power', 'psu', 'supply', 'cable', 'wire', 'battery', 'bateria', 'adapter'] },
+  { category: 'Memoria RAM',             keys: ['ram', 'dimm', 'sodimm', 'lpddr', 'memory'] },
+  { category: 'Tarjeta Gráfica',         keys: ['gpu', 'graphic', 'video', 'rtx', 'gtx', 'radeon', 'pcie', 'dgpu', 'adreno', 'mali', 'camera'] },
+  { category: 'Procesador/Refrigeración', keys: ['cpu', 'soc', 'cooler', 'fan', 'heatsink', 'heatpipe', 'vapor', 'pump', 'cuper', 'socket'] },
+  { category: 'Placa Base',              keys: ['board', 'mother', 'main', 'motherboard', 'keyboard', 'trackpad', 'hinge', 'screen', 'display', 'oled', 'frame', 'chassis', 'glass'] },
+  { category: 'Almacenamiento',          keys: ['ssd', 'hdd', 'disk', 'nvme', 'ufs', 'storage', 'sata', 'm.2'] },
+  { category: 'Fuente de Poder',         keys: ['power', 'psu', 'supply', 'cable', 'wire', 'battery', 'bateria', 'adapter', 'usb'] },
 ];
 
 export function resolveModelPath(profile, telemetry) {
@@ -37,6 +38,9 @@ export function resolveModelPath(profile, telemetry) {
     .toString()
     .trim()
     .toLowerCase();
+  if (rawTipo === 'phone' || rawTipo === 'smartphone' || rawTipo === 'mobile') {
+    return PHONE_MODEL_PATH;
+  }
   return rawTipo === 'laptop' ? LAPTOP_MODEL_PATH : DESKTOP_MODEL_PATH;
 }
 

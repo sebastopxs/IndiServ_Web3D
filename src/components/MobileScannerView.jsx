@@ -7,7 +7,7 @@ import { runLocalDeviceAudit } from '../utils/deviceAuditFallback';
 import {
   Cpu, BatteryCharging, Wifi, Smartphone, MonitorPlay, Play, Square,
   Activity, RefreshCw, HardDrive, MemoryStick, ShieldCheck, Thermometer,
-  Sparkles, CheckCircle2, AlertTriangle, ShieldAlert,
+  Sparkles, CheckCircle2, AlertTriangle, ShieldAlert, Box, Zap, Stethoscope,
 } from 'lucide-react';
 
 const HardwareInfo = registerPlugin('HardwareInfo');
@@ -71,7 +71,7 @@ function UsageBar({ pct, color = 'from-cyan-500 to-emerald-400' }) {
   );
 }
 
-export default function MobileScannerView({ user }) {
+export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D, onOpenDiagnostic }) {
   const [info, setInfo] = useState(null);
   const [scanning, setScanning] = useState(true);
 
@@ -136,7 +136,7 @@ export default function MobileScannerView({ user }) {
       const ramAvailGb = nativeHw?.ramAvailMb ? +(nativeHw.ramAvailMb / 1024).toFixed(1) : null;
       const ramUsedGb = ramTotalGb != null && ramAvailGb != null ? +(ramTotalGb - ramAvailGb).toFixed(1) : null;
 
-      setInfo({
+      const scannedData = {
         isNative: Boolean(nativeHw),
         displayName: `${brandPrefix} ${model}`.trim(),
         manufacturer,
@@ -159,8 +159,13 @@ export default function MobileScannerView({ user }) {
         storageUsedPct: nativeHw?.storageUsedPct ?? null,
         batteryPct: nativeHw?.batteryPct >= 0 ? nativeHw.batteryPct : (battInfo.batteryLevel != null ? Math.round(battInfo.batteryLevel * 100) : null),
         isCharging: nativeHw?.batteryCharging ?? Boolean(battInfo.isCharging),
+        batteryStatusText: nativeHw?.batteryStatusText || (battInfo.isCharging ? 'Cargando' : 'Descargando'),
+        batteryPlugged: nativeHw?.batteryPlugged || (battInfo.isCharging ? 'Cargador AC' : 'Desconectado'),
+        batteryTechnology: nativeHw?.batteryTechnology || 'Li-ion',
         batteryTempC: nativeHw?.batteryTempC ?? null,
         batteryVoltageMv: nativeHw?.batteryVoltageMv ?? null,
+        batteryCurrentMa: nativeHw?.batteryCurrentMa ?? null,
+        batteryChargeCounterMah: nativeHw?.batteryChargeCounterMah ?? null,
         batteryHealth: nativeHw?.batteryHealth || 'Estándar',
         os: nativeHw?.androidRelease
           ? `Android ${nativeHw.androidRelease} (API ${nativeHw.sdkInt})`
@@ -176,7 +181,9 @@ export default function MobileScannerView({ user }) {
         netType: (netInfo.connectionType || 'desconocida').toUpperCase(),
         gpu,
         screenRes,
-      });
+      };
+      setInfo(scannedData);
+      onDeviceScanned?.(scannedData);
     } finally {
       setScanning(false);
     }
@@ -381,30 +388,108 @@ export default function MobileScannerView({ user }) {
               {info.storageUsedPct != null && <UsageBar pct={info.storageUsedPct} color="from-amber-500 to-emerald-400" />}
             </div>
 
-            {/* Batería, Temperatura y Salud */}
-            <div className="bg-[#131c2e] border border-slate-800 rounded-xl p-3.5">
-              <div className="flex items-center justify-between">
+            {/* Batería Detallada, Estado de Salud, Voltaje y Corriente */}
+            <div className="sm:col-span-2 bg-[#131c2e] border border-slate-800 rounded-xl p-4 space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-yellow-400 text-[10px] font-semibold uppercase">
-                  <BatteryCharging className="w-3.5 h-3.5" /> Batería &amp; Térmica
+                  <BatteryCharging className="w-3.5 h-3.5" /> Estado y Salud de Batería
                 </div>
-                <span className="text-[10px] text-emerald-400 font-medium">{info.batteryHealth}</span>
+                <span
+                  className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                    ['Óptima', 'Estándar'].includes(info.batteryHealth)
+                      ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                      : info.batteryHealth === 'Fría'
+                      ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
+                      : 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                  }`}
+                >
+                  Salud: {info.batteryHealth}
+                </span>
               </div>
-              <p className="text-lg font-bold text-white mt-1">
-                {info.batteryPct != null ? `${info.batteryPct}%` : 'N/D'}
+
+              <div className="flex items-baseline justify-between gap-3">
+                <div className="flex items-baseline gap-2.5">
+                  <p className="text-2xl font-bold text-white">
+                    {info.batteryPct != null ? `${info.batteryPct}%` : 'N/D'}
+                  </p>
+                  <span className="text-xs text-slate-300 font-medium">
+                    {info.batteryStatusText} · {info.batteryPlugged}
+                  </span>
+                </div>
                 {info.batteryTempC != null && (
-                  <span className="text-xs font-mono text-amber-300 ml-2 inline-flex items-center gap-0.5">
-                    <Thermometer className="w-3 h-3" /> {info.batteryTempC}°C
+                  <span
+                    className={`text-xs font-mono inline-flex items-center gap-1 px-2 py-0.5 rounded ${
+                      info.batteryTempC >= 40
+                        ? 'bg-rose-500/15 text-rose-300'
+                        : 'bg-amber-500/10 text-amber-300'
+                    }`}
+                  >
+                    <Thermometer className="w-3.5 h-3.5" /> {info.batteryTempC}°C
                   </span>
                 )}
-              </p>
-              <p className="text-[11px] text-slate-400">
-                {info.isCharging ? 'Cargando energía' : 'En batería'}
-                {info.batteryVoltageMv ? ` · ${(info.batteryVoltageMv / 1000).toFixed(2)} V` : ''}
-              </p>
+              </div>
+
+              {/* Barra de carga visual */}
+              {info.batteryPct != null && (
+                <div className="w-full h-2 bg-slate-900 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full transition-all duration-500 bg-gradient-to-r ${
+                      info.batteryPct <= 20
+                        ? 'from-rose-500 to-red-400'
+                        : info.batteryPct <= 45
+                        ? 'from-amber-500 to-yellow-400'
+                        : 'from-emerald-500 to-cyan-400'
+                    }`}
+                    style={{ width: `${Math.max(0, Math.min(100, info.batteryPct))}%` }}
+                  />
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-[11px] font-mono">
+                <div className="bg-[#0b0f19] border border-slate-800/80 rounded-lg px-2.5 py-1.5">
+                  <span className="text-[9px] text-slate-500 block uppercase">Voltaje</span>
+                  <span className="text-slate-200 font-semibold">
+                    {info.batteryVoltageMv ? `${(info.batteryVoltageMv / 1000).toFixed(2)} V` : 'N/D'}
+                  </span>
+                </div>
+                <div className="bg-[#0b0f19] border border-slate-800/80 rounded-lg px-2.5 py-1.5">
+                  <span className="text-[9px] text-slate-500 block uppercase">Tecnología</span>
+                  <span className="text-slate-200 font-semibold">{info.batteryTechnology || 'Li-ion'}</span>
+                </div>
+                <div className="bg-[#0b0f19] border border-slate-800/80 rounded-lg px-2.5 py-1.5">
+                  <span className="text-[9px] text-slate-500 block uppercase">Corriente</span>
+                  <span className="text-slate-200 font-semibold inline-flex items-center gap-0.5">
+                    <Zap className="w-3 h-3 text-amber-400" />
+                    {info.batteryCurrentMa != null ? `${Math.abs(info.batteryCurrentMa)} mA` : 'N/D'}
+                  </span>
+                </div>
+                <div className="bg-[#0b0f19] border border-slate-800/80 rounded-lg px-2.5 py-1.5">
+                  <span className="text-[9px] text-slate-500 block uppercase">Carga Actual</span>
+                  <span className="text-slate-200 font-semibold">
+                    {info.batteryChargeCounterMah != null ? `${info.batteryChargeCounterMah} mAh` : 'N/D'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Acciones rápidas: Gemelo Digital 3D del Teléfono y Árbol de Diagnóstico */}
+            <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <button
+                onClick={() => onOpenPhone3D?.({ deviceInfo: info })}
+                className="py-2.5 px-3.5 rounded-xl bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-950/40"
+              >
+                <Box className="w-4 h-4" /> Ver mi Teléfono en 3D
+              </button>
+              <button
+                onClick={() => onOpenDiagnostic?.()}
+                className="py-2.5 px-3.5 rounded-xl bg-[#131c2e] hover:bg-slate-800 border border-emerald-500/35 text-emerald-300 text-xs font-semibold flex items-center justify-center gap-2 transition-colors"
+              >
+                <Stethoscope className="w-4 h-4" /> Abrir Árbol de Diagnóstico
+              </button>
             </div>
 
             {/* Red & Sistema */}
-            <div className="bg-[#131c2e] border border-slate-800 rounded-xl p-3.5">
+            <div className="sm:col-span-2 bg-[#131c2e] border border-slate-800 rounded-xl p-3.5">
               <div className="flex items-center gap-2 text-violet-400 text-[10px] font-semibold uppercase">
                 <Wifi className="w-3.5 h-3.5" /> Red &amp; Seguridad SO
               </div>
