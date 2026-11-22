@@ -2,9 +2,12 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { Device } from '@capacitor/device';
 import { Network } from '@capacitor/network';
+import { supabase } from '../supabaseClient';
+import { runLocalDeviceAudit } from '../utils/deviceAuditFallback';
 import {
   Cpu, BatteryCharging, Wifi, Smartphone, MonitorPlay, Play, Square,
   Activity, RefreshCw, HardDrive, MemoryStick, ShieldCheck, Thermometer,
+  Sparkles, CheckCircle2, AlertTriangle, ShieldAlert,
 } from 'lucide-react';
 
 const HardwareInfo = registerPlugin('HardwareInfo');
@@ -72,6 +75,10 @@ export default function MobileScannerView({ user }) {
   const [info, setInfo] = useState(null);
   const [scanning, setScanning] = useState(true);
 
+  // Auditoría con IA (Modelo comercial + autenticidad de piezas)
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiAudit, setAiAudit] = useState(null);
+
   // Micro-Stress CPU con Web Workers
   const [stressRunning, setStressRunning] = useState(false);
   const [stressProgress, setStressProgress] = useState(0);
@@ -115,7 +122,10 @@ export default function MobileScannerView({ user }) {
       }
 
       const gpu = detectWebGLGpu();
-      const screenRes = `${window.screen.width} × ${window.screen.height} (DPR ${window.devicePixelRatio?.toFixed(1) || 1})`;
+      const screenRes =
+        nativeHw?.screenWidthPx && nativeHw?.screenHeightPx
+          ? `${nativeHw.screenWidthPx} × ${nativeHw.screenHeightPx}${nativeHw.refreshRateHz ? ` @ ${nativeHw.refreshRateHz}Hz` : ''}`
+          : `${window.screen.width} × ${window.screen.height} (DPR ${window.devicePixelRatio?.toFixed(1) || 1})`;
 
       const manufacturer = nativeHw?.manufacturer || devInfo.manufacturer || 'Dispositivo';
       const brand = nativeHw?.brand || '';
@@ -157,6 +167,11 @@ export default function MobileScannerView({ user }) {
           : `${(devInfo.operatingSystem || 'Android').toUpperCase()} ${devInfo.osVersion || ''}`.trim(),
         securityPatch: nativeHw?.securityPatch || 'N/D',
         kernelVersion: nativeHw?.kernelVersion || '',
+        buildTags: nativeHw?.buildTags || 'N/D',
+        verifiedBootState: nativeHw?.verifiedBootState || 'unknown',
+        isRooted: Boolean(nativeHw?.isRooted),
+        isEmulator: Boolean(nativeHw?.isEmulator),
+        refreshRateHz: nativeHw?.refreshRateHz ?? null,
         connected: netInfo.connected,
         netType: (netInfo.connectionType || 'desconocida').toUpperCase(),
         gpu,
@@ -171,6 +186,25 @@ export default function MobileScannerView({ user }) {
     scanDevice();
     return () => stopStress();
   }, []);
+
+  const verifyWithAI = async () => {
+    if (!info || aiLoading) return;
+    setAiLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('analizar-dispositivo-ia', {
+        body: { telemetry: info },
+      });
+      if (!error && data && !data.error && data.nombre_comercial) {
+        setAiAudit(data);
+      } else {
+        setAiAudit(runLocalDeviceAudit(info));
+      }
+    } catch {
+      setAiAudit(runLocalDeviceAudit(info));
+    } finally {
+      setAiLoading(false);
+    }
+  };
 
   const stopStress = () => {
     workersRef.current.forEach((w) => {
@@ -396,6 +430,104 @@ export default function MobileScannerView({ user }) {
               </div>
               <p className="text-xs font-mono text-slate-200 mt-1 break-words">{info.gpu}</p>
             </div>
+          </div>
+        )}
+
+        {/* Verificación de Modelo Comercial y Autenticidad con IA */}
+        {info && (
+          <div className="bg-[#131c2e] border border-cyan-500/25 rounded-2xl p-4 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-cyan-400" />
+                <div>
+                  <h3 className="text-sm font-semibold text-white">Auditoría de Autenticidad con IA</h3>
+                  <p className="text-[11px] text-slate-400">
+                    Identifica el nombre comercial exacto y valida coherencia de piezas e integridad.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={verifyWithAI}
+              disabled={aiLoading}
+              className="w-full py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 to-emerald-600 hover:from-cyan-500 hover:to-emerald-500 text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+            >
+              <Sparkles className={`w-3.5 h-3.5 ${aiLoading ? 'animate-spin' : ''}`} />
+              {aiLoading ? 'Auditando modelo y hardware con IA…' : '✨ Verificar Modelo y Piezas con IA'}
+            </button>
+
+            {aiAudit && (
+              <div className="bg-[#0b0f19] border border-slate-800 rounded-xl p-3.5 space-y-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wider text-cyan-400 font-semibold">
+                      Modelo Comercial Identificado
+                    </p>
+                    <h4 className="text-base font-bold text-white mt-0.5">
+                      {aiAudit.nombre_comercial}
+                    </h4>
+                    <p className="text-[11px] text-slate-400">
+                      Lanzamiento: {aiAudit.anio_lanzamiento || 'N/D'} · Confianza: {aiAudit.confianza_pct ?? 80}% ·{' '}
+                      <span className="text-cyan-400/80">
+                        {aiAudit.origen === 'gemini-ia' ? 'Gemini IA Cloud' : 'Motor Heurístico'}
+                      </span>
+                    </p>
+                  </div>
+
+                  <span
+                    className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-full border ${
+                      aiAudit.veredicto === 'Original Coherente'
+                        ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                        : aiAudit.veredicto?.includes('Modificado')
+                        ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                        : 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                    }`}
+                  >
+                    {aiAudit.veredicto === 'Original Coherente' ? (
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                    ) : aiAudit.veredicto?.includes('Modificado') ? (
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                    ) : (
+                      <ShieldAlert className="w-3.5 h-3.5" />
+                    )}
+                    {aiAudit.veredicto}
+                  </span>
+                </div>
+
+                <p className="text-xs text-slate-300 leading-relaxed">{aiAudit.resumen}</p>
+
+                {Array.isArray(aiAudit.componentes) && aiAudit.componentes.length > 0 && (
+                  <div className="space-y-1.5 pt-1 border-t border-slate-800/80">
+                    {aiAudit.componentes.map((c, idx) => (
+                      <div key={idx} className="flex items-start justify-between gap-2 text-[11px] bg-slate-900/60 px-2.5 py-2 rounded-lg">
+                        <div className="min-w-0">
+                          <span className="font-semibold text-white">{c.parte}:</span>{' '}
+                          <span className="text-slate-400">{c.detalle}</span>
+                        </div>
+                        <span
+                          className={`shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+                            c.estado === 'Coherente'
+                              ? 'bg-emerald-500/15 text-emerald-400'
+                              : c.estado === 'Advertencia'
+                              ? 'bg-amber-500/15 text-amber-400'
+                              : 'bg-rose-500/15 text-rose-400'
+                          }`}
+                        >
+                          {c.estado}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {aiAudit.nota_fisica && (
+                  <p className="text-[10px] text-slate-500 italic leading-relaxed border-t border-slate-800/80 pt-2">
+                    ℹ {aiAudit.nota_fisica}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
 

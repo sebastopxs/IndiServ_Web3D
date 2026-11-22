@@ -8,6 +8,9 @@ import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Environment;
 import android.os.StatFs;
+import android.util.DisplayMetrics;
+import android.view.Display;
+import android.view.WindowManager;
 
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -18,6 +21,7 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
+import java.io.InputStreamReader;
 import java.util.Arrays;
 
 @CapacitorPlugin(name = "HardwareInfo")
@@ -60,6 +64,54 @@ public class HardwareInfoPlugin extends Plugin {
             }
         }
         return maxKhz > 0 ? Math.round(maxKhz / 1000f) : 0;
+    }
+
+    private String getSystemProp(String key) {
+        try {
+            Process p = Runtime.getRuntime().exec(new String[]{"getprop", key});
+            try (BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                String line = br.readLine();
+                return line != null ? line.trim() : "";
+            }
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
+    private boolean detectRoot() {
+        String tags = Build.TAGS != null ? Build.TAGS : "";
+        if (tags.contains("test-keys")) {
+            return true;
+        }
+        String[] paths = {
+            "/system/bin/su",
+            "/system/xbin/su",
+            "/sbin/su",
+            "/data/local/xbin/su",
+            "/data/local/bin/su",
+            "/system/app/Superuser.apk",
+            "/su/bin/su"
+        };
+        for (String path : paths) {
+            if (new File(path).exists()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean detectEmulator() {
+        String fp = (Build.FINGERPRINT != null ? Build.FINGERPRINT : "").toLowerCase();
+        String model = (Build.MODEL != null ? Build.MODEL : "").toLowerCase();
+        String hw = (Build.HARDWARE != null ? Build.HARDWARE : "").toLowerCase();
+        String prod = (Build.PRODUCT != null ? Build.PRODUCT : "").toLowerCase();
+        return fp.contains("generic")
+            || fp.contains("vbox")
+            || model.contains("emulator")
+            || model.contains("android sdk built for")
+            || hw.contains("goldfish")
+            || hw.contains("ranchu")
+            || prod.contains("sdk_gphone");
     }
 
     private String mapBatteryHealth(int code) {
@@ -190,7 +242,32 @@ public class HardwareInfoPlugin extends Plugin {
         } catch (Exception ignored) {
         }
 
-        // 6. Sistema Operativo y Kernel
+        // 6. Pantalla física y Tasa de Refresco (Hz)
+        try {
+            WindowManager wm = (WindowManager) ctx.getSystemService(Context.WINDOW_SERVICE);
+            if (wm != null) {
+                Display display = wm.getDefaultDisplay();
+                DisplayMetrics dm = new DisplayMetrics();
+                display.getRealMetrics(dm);
+                ret.put("screenWidthPx", dm.widthPixels);
+                ret.put("screenHeightPx", dm.heightPixels);
+                ret.put("refreshRateHz", Math.round(display.getRefreshRate()));
+            }
+        } catch (Exception ignored) {
+        }
+
+        // 7. Integridad de Sistema (Bootloader, Tags, Root, Emulador)
+        String buildTags = Build.TAGS != null ? Build.TAGS : "unknown";
+        String verifiedBoot = getSystemProp("ro.boot.verifiedbootstate");
+        if (verifiedBoot.isEmpty()) verifiedBoot = "unknown";
+
+        ret.put("buildTags", buildTags);
+        ret.put("fingerprint", Build.FINGERPRINT != null ? Build.FINGERPRINT : "");
+        ret.put("verifiedBootState", verifiedBoot);
+        ret.put("isRooted", detectRoot());
+        ret.put("isEmulator", detectEmulator());
+
+        // 8. Sistema Operativo y Kernel
         ret.put("androidRelease", Build.VERSION.RELEASE != null ? Build.VERSION.RELEASE : "?");
         ret.put("sdkInt", Build.VERSION.SDK_INT);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
