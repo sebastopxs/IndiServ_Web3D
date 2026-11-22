@@ -1,9 +1,16 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { Capacitor } from '@capacitor/core';
 import ChassisScene from './components/ChassisScene';
 import TechSidebar from './components/TechSidebar';
+import MobileAuthView from './components/MobileAuthView';
+import MobileScannerView from './components/MobileScannerView';
+import TicketLookupBar from './components/TicketLookupBar';
 import { mapTelemetryTo3DProfile } from './utils/hardwareMapper';
 import { supabase } from './supabaseClient';
-import { RotateCcw, Maximize2, Minimize2, EyeOff, Eye, FileDown, Laptop, Monitor } from 'lucide-react';
+import {
+  RotateCcw, Maximize2, Minimize2, EyeOff, Eye, FileDown, Laptop, Monitor,
+  Box, Search, Smartphone, LogOut,
+} from 'lucide-react';
 
 /* ═══════════════════════════════════════════
    Fallback Mock Data (solo cuando NO hay ticket en URL)
@@ -194,6 +201,24 @@ const MemoizedChassisScene = React.memo(ChassisScene, (prevProps, nextProps) => 
    App Principal
    ═══════════════════════════════════════════ */
 export default function App() {
+  const isNativeApp = useMemo(() => {
+    try {
+      return Capacitor.isNativePlatform();
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const initialTicketParam = useMemo(
+    () => new URLSearchParams(window.location.search).get('ticket')?.trim() || '',
+    []
+  );
+
+  // Autenticación solo requerida al iniciar como APK nativo (enlaces públicos ?ticket= de Vercel entran directo)
+  const [authUser, setAuthUser] = useState(null);
+  const [guestUnlocked, setGuestUnlocked] = useState(!isNativeApp || Boolean(initialTicketParam));
+  const [activeTab, setActiveTab] = useState(isNativeApp && !initialTicketParam ? 'scanner' : '3d');
+
   const [telemetry, setTelemetry] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isLive, setIsLive] = useState(false);
@@ -208,78 +233,72 @@ export default function App() {
   // Build 3D profile from telemetry
   const profile = useMemo(() => mapTelemetryTo3DProfile(telemetry), [telemetry]);
 
-  /* ── Consulta a Supabase con id_ticket ── */
-  useEffect(() => {
-    (async () => {
-      // 1. Extraer el ticket de la URL limpiando espacios
-      const params = new URLSearchParams(window.location.search);
-      const ticketParam = params.get('ticket')?.trim();
-      const tipoParam = params.get('tipo')?.trim()?.toLowerCase();
+  const loadTicketById = useCallback(async (ticketIdRaw, tipoParam = '') => {
+    const ticketParam = (ticketIdRaw || '').trim();
+    setLoading(true);
+    setSelectedComponent(null);
 
-      if (!ticketParam) {
-        console.info("Sin parámetro 'ticket' en la URL. Activando snapshot de respaldo.");
-        const fallbackData = tipoParam === 'laptop'
-          ? { ...FALLBACK, tipo_equipo: 'laptop', specs_json: { tipo_equipo: 'laptop' } }
-          : FALLBACK;
-        setTelemetry(fallbackData);
-        setIsLive(false);
-        setStatusMessage('[Offline — Snapshot de respaldo cargado]');
-        setLoading(false);
-        return;
-      }
+    if (!ticketParam) {
+      const fallbackData = tipoParam === 'laptop'
+        ? { ...FALLBACK, tipo_equipo: 'laptop', specs_json: { tipo_equipo: 'laptop' } }
+        : FALLBACK;
+      setTelemetry(fallbackData);
+      setIsLive(false);
+      setStatusMessage('[Offline — Snapshot de respaldo cargado]');
+      setLoading(false);
+      return;
+    }
 
-      try {
-        console.log(`[Supabase] Consultando ticket: "${ticketParam}" en tabla 'reportes_diagnostico'...`);
-        
-        // 2. Consulta exacta a 'reportes_diagnostico' por 'id_ticket' (con 1 reintento si la subida sigue en curso)
-        let { data, error } = await supabase
+    try {
+      let { data, error } = await supabase
+        .from('reportes_diagnostico')
+        .select('*')
+        .eq('id_ticket', ticketParam)
+        .single();
+
+      if ((error || !data) && ticketParam) {
+        await new Promise((r) => setTimeout(r, 1200));
+        const retry = await supabase
           .from('reportes_diagnostico')
           .select('*')
           .eq('id_ticket', ticketParam)
           .single();
+        data = retry.data;
+        error = retry.error;
+      }
 
-        if ((error || !data) && ticketParam) {
-          await new Promise((r) => setTimeout(r, 1200));
-          const retry = await supabase
-            .from('reportes_diagnostico')
-            .select('*')
-            .eq('id_ticket', ticketParam)
-            .single();
-          data = retry.data;
-          error = retry.error;
-        }
-
-        // 3. Manejo explícito de error
-        if (error) {
-          console.error("Error Supabase:", error);
-          setStatusMessage(`[Error: ${error.message || 'Ticket no encontrado'}]`);
-          setTelemetry({ ...FALLBACK, id_ticket: ticketParam, ticket_id: ticketParam });
-          setIsLive(false);
-          return;
-        }
-
-        if (data) {
-          console.log("[Supabase] Telemetría real recuperada:", data);
-          const parsed = formatSupabaseTelemetry(data);
-          setTelemetry(parsed);
-          setIsLive(true);
-          setStatusMessage(null);
-        } else {
-          console.warn("[Supabase] No se encontró fila para ticket:", ticketParam);
-          setStatusMessage('[Ticket no encontrado en base de datos]');
-          setTelemetry({ ...FALLBACK, id_ticket: ticketParam, ticket_id: ticketParam });
-          setIsLive(false);
-        }
-      } catch (err) {
-        console.error("Error inesperado al conectar con Supabase:", err);
-        setStatusMessage('[Error de conexión con base de datos]');
+      if (error || !data) {
+        setStatusMessage(`[${error ? 'Error al consultar ticket' : 'Ticket no encontrado'}]`);
         setTelemetry({ ...FALLBACK, id_ticket: ticketParam, ticket_id: ticketParam });
         setIsLive(false);
-      } finally {
-        setLoading(false);
+        return;
       }
-    })();
+
+      const parsed = formatSupabaseTelemetry(data);
+      setTelemetry(parsed);
+      setIsLive(true);
+      setStatusMessage(null);
+    } catch {
+      setStatusMessage('[Error de conexión con base de datos]');
+      setTelemetry({ ...FALLBACK, id_ticket: ticketParam, ticket_id: ticketParam });
+      setIsLive(false);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  /* ── Carga inicial desde URL (?ticket=... / ?tipo=...) ── */
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const ticketParam = params.get('ticket')?.trim() || '';
+    const tipoParam = params.get('tipo')?.trim()?.toLowerCase() || '';
+    loadTicketById(ticketParam, tipoParam);
+  }, [loadTicketById]);
+
+  const handleSelectTicketFromMobile = useCallback(async (idTicket) => {
+    setActiveTab('3d');
+    await loadTicketById(idTicket);
+  }, [loadTicketById]);
 
   const handleSelect = useCallback((comp) => {
     setSelectedComponent(comp);
@@ -313,80 +332,146 @@ export default function App() {
     });
   }, [isLaptopModel]);
 
-  return (
-    <div className="w-screen h-screen flex bg-zinc-950 font-sans text-zinc-100 overflow-hidden">
-      {/* ── 3D Viewport ── */}
-      <div className="flex-1 relative">
-        {loading ? (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="flex flex-col items-center gap-3">
-              <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
-              <span className="text-[10px] uppercase tracking-[0.2em] text-zinc-500 font-medium">Cargando telemetría del equipo</span>
-            </div>
-          </div>
-        ) : (
-          <CanvasErrorBoundary>
-            <MemoizedChassisScene
-              profile={profile}
-              telemetry={telemetry}
-              onSelectComponent={handleSelect}
-              explodedView={explodedView}
-              registerReset={(fn) => setResetCameraFn(() => fn)}
-            />
-          </CanvasErrorBoundary>
-        )}
-
-        {/* ── Top bar ── */}
-        <div className="absolute top-0 left-0 right-0 pointer-events-none z-10 p-5 flex items-start justify-between">
-          {/* Brand & Connection Status */}
-          <div className="pointer-events-auto flex items-center gap-3 bg-zinc-950/70 backdrop-blur-md border border-white/[0.06] rounded-xl px-4 py-3 shadow-lg">
-            <div className="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center">
-              <div className="w-2.5 h-2.5 bg-emerald-400 rounded-[3px]" />
-            </div>
-            <div>
-              <h1 className="text-sm font-semibold text-white tracking-tight leading-none">IndiServ <span className="font-light text-zinc-400">Analytica</span></h1>
-              <p className="text-[9px] text-zinc-600 tracking-wider uppercase mt-0.5">Gemelo Digital 3D &amp; Telemetría</p>
-            </div>
-            {isLive ? (
-              <span className="ml-3 text-[10px] text-emerald-400 font-medium bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-0.5 rounded flex items-center gap-1.5 shadow-sm">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                [En Línea — Telemetría en Vivo]
-              </span>
-            ) : (
-              <span className="ml-3 text-[10px] text-amber-400/90 font-medium bg-amber-500/10 border border-amber-500/20 px-2.5 py-0.5 rounded">
-                {statusMessage || '[Offline — Snapshot de respaldo cargado]'}
-              </span>
-            )}
-          </div>
-
-          {/* Toolbar */}
-          <div className="pointer-events-auto flex items-center gap-2 bg-zinc-950/70 backdrop-blur-md border border-white/[0.06] rounded-xl px-2 py-1.5 shadow-lg">
-            <ToolbarBtn
-              icon={isLaptopModel ? Laptop : Monitor}
-              label={isLaptopModel ? 'Modo: Laptop' : 'Modo: PC'}
-              active={isLaptopModel}
-              onClick={toggleDeviceType}
-            />
-            <div className="w-px h-5 bg-white/[0.06]" />
-            <ToolbarBtn icon={RotateCcw} label="Restablecer" onClick={resetView} />
-            <div className="w-px h-5 bg-white/[0.06]" />
-            <ToolbarBtn icon={explodedView ? Minimize2 : Maximize2} label={explodedView ? 'Colapsar' : 'Explosión'} active={explodedView} onClick={() => { setExplodedView((v) => !v); if (!explodedView && showCase) setShowCase(false); }} />
-            <ToolbarBtn icon={showCase ? EyeOff : Eye} label={showCase ? 'Sin Chasis' : 'Chasis'} onClick={() => setShowCase((v) => !v)} />
-            <div className="w-px h-5 bg-white/[0.06]" />
-            <button onClick={() => window.print()} className="flex items-center gap-1.5 text-[11px] font-medium text-white bg-emerald-600/90 hover:bg-emerald-500 px-3 py-1.5 rounded-lg transition-colors">
-              <FileDown className="w-3.5 h-3.5" /> Reporte
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Sidebar ── */}
-      <TechSidebar
-        selectedComponent={selectedComponent}
-        ticketData={telemetry}
-        onCloseComponent={handleSidebarAction}
+  // Pantalla de Login/Registro en APK Android nativo (cuando aún no inicia sesión)
+  if (!guestUnlocked && !authUser) {
+    return (
+      <MobileAuthView
+        onAuthenticated={(user) => {
+          setAuthUser(user);
+          setActiveTab('scanner');
+        }}
+        onGuestDemo={() => {
+          setGuestUnlocked(true);
+          setActiveTab('scanner');
+        }}
       />
+    );
+  }
+
+  return (
+    <div className="w-screen h-screen flex flex-col md:flex-row bg-zinc-950 font-sans text-zinc-100 overflow-hidden relative">
+      {activeTab === 'scanner' ? (
+        <div className="flex-1 overflow-hidden">
+          <MobileScannerView user={authUser} />
+        </div>
+      ) : activeTab === 'tickets' ? (
+        <div className="flex-1 overflow-hidden">
+          <TicketLookupBar onSelectTicket={handleSelectTicketFromMobile} />
+        </div>
+      ) : (
+        <>
+          {/* ── 3D Viewport ── */}
+          <div className="flex-1 relative min-h-[48vh]">
+            {loading ? (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="flex flex-col items-center gap-3">
+                  <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+                  <span className="text-[10px] uppercase tracking-[0.2em] text-zinc-500 font-medium">Cargando telemetría del equipo</span>
+                </div>
+              </div>
+            ) : (
+              <CanvasErrorBoundary>
+                <MemoizedChassisScene
+                  profile={profile}
+                  telemetry={telemetry}
+                  onSelectComponent={handleSelect}
+                  explodedView={explodedView}
+                  registerReset={(fn) => setResetCameraFn(() => fn)}
+                />
+              </CanvasErrorBoundary>
+            )}
+
+            {/* ── Top bar ── */}
+            <div className="absolute top-0 left-0 right-0 pointer-events-none z-10 p-3 md:p-5 flex flex-wrap items-start justify-between gap-2">
+              {/* Brand & Connection Status */}
+              <div className="pointer-events-auto flex items-center gap-2.5 bg-zinc-950/75 backdrop-blur-md border border-white/[0.06] rounded-xl px-3 md:px-4 py-2 md:py-3 shadow-lg">
+                <div className="w-6 h-6 md:w-7 md:h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center">
+                  <div className="w-2.5 h-2.5 bg-emerald-400 rounded-[3px]" />
+                </div>
+                <div>
+                  <h1 className="text-xs md:text-sm font-semibold text-white tracking-tight leading-none">
+                    IndiServ <span className="font-light text-zinc-400">Analytica</span>
+                  </h1>
+                  <p className="text-[8px] md:text-[9px] text-zinc-500 tracking-wider uppercase mt-0.5">
+                    Gemelo Digital 3D &amp; Telemetría
+                  </p>
+                </div>
+                {isLive ? (
+                  <span className="hidden sm:flex ml-2 text-[10px] text-emerald-400 font-medium bg-emerald-500/10 border border-emerald-500/25 px-2 py-0.5 rounded items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    En Línea
+                  </span>
+                ) : (
+                  <span className="hidden sm:inline ml-2 text-[10px] text-amber-400/90 font-medium bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded">
+                    {statusMessage || '[Offline]'}
+                  </span>
+                )}
+              </div>
+
+              {/* Toolbar */}
+              <div className="pointer-events-auto flex items-center gap-1.5 bg-zinc-950/75 backdrop-blur-md border border-white/[0.06] rounded-xl px-2 py-1.5 shadow-lg">
+                <ToolbarBtn
+                  icon={isLaptopModel ? Laptop : Monitor}
+                  label={isLaptopModel ? 'Modo: Laptop' : 'Modo: PC'}
+                  active={isLaptopModel}
+                  onClick={toggleDeviceType}
+                />
+                <div className="w-px h-5 bg-white/[0.06]" />
+                <ToolbarBtn icon={RotateCcw} label="Restablecer" onClick={resetView} />
+                <div className="w-px h-5 bg-white/[0.06]" />
+                <ToolbarBtn icon={explodedView ? Minimize2 : Maximize2} label={explodedView ? 'Colapsar' : 'Explosión'} active={explodedView} onClick={() => { setExplodedView((v) => !v); if (!explodedView && showCase) setShowCase(false); }} />
+                <ToolbarBtn icon={showCase ? EyeOff : Eye} label={showCase ? 'Sin Chasis' : 'Chasis'} onClick={() => setShowCase((v) => !v)} />
+                <div className="hidden sm:block w-px h-5 bg-white/[0.06]" />
+                <button onClick={() => window.print()} className="hidden sm:flex items-center gap-1.5 text-[11px] font-medium text-white bg-emerald-600/90 hover:bg-emerald-500 px-3 py-1.5 rounded-lg transition-colors">
+                  <FileDown className="w-3.5 h-3.5" /> Reporte
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* ── Sidebar (Derecha en Desktop, Inferior en Móvil) ── */}
+          <TechSidebar
+            selectedComponent={selectedComponent}
+            ticketData={telemetry}
+            onCloseComponent={handleSidebarAction}
+          />
+        </>
+      )}
+
+      {/* ── Barra de Navegación Inferior (Visible en Móvil / Android App) ── */}
+      {(isNativeApp || !initialTicketParam) && (
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-[#0f172a]/95 backdrop-blur-xl border-t border-white/10 px-2 py-2 flex items-center justify-around">
+          <MobileNavBtn icon={Smartphone} label="Mi Android" active={activeTab === 'scanner'} onClick={() => setActiveTab('scanner')} />
+          <MobileNavBtn icon={Search} label="Tickets" active={activeTab === 'tickets'} onClick={() => setActiveTab('tickets')} />
+          <MobileNavBtn icon={Box} label="Visor 3D" active={activeTab === '3d'} onClick={() => setActiveTab('3d')} />
+          {isNativeApp && (
+            <MobileNavBtn
+              icon={LogOut}
+              label="Cuenta"
+              active={false}
+              onClick={() => {
+                setAuthUser(null);
+                setGuestUnlocked(false);
+              }}
+            />
+          )}
+        </nav>
+      )}
     </div>
+  );
+}
+
+function MobileNavBtn({ icon: Icon, label, active, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex flex-col items-center gap-0.5 px-3 py-1 rounded-lg transition-colors ${
+        active ? 'text-emerald-400 bg-emerald-500/10' : 'text-slate-400 hover:text-white'
+      }`}
+    >
+      <Icon className="w-4 h-4" />
+      <span className="text-[10px] font-medium">{label}</span>
+    </button>
   );
 }
 

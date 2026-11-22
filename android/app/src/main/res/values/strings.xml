@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">IndiServ Analytica</string>
+    <string name="title_activity_main">IndiServ Analytica</string>
+    <string name="package_name">com.indiserv.analytica</string>
+    <string name="custom_url_scheme">com.indiserv.analytica</string>
+</resources>

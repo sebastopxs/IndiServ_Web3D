@@ -1,0 +1,75 @@
+name: Build Android APK (Capacitor)
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-android:
+    name: Compilar IndiServ_Analytica.apk
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Configurar Java 21 (Capacitor 8 / Android Gradle)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Instalar dependencias npm
+        run: npm ci
+
+      - name: Compilar aplicación Web (Vite)
+        run: npm run build
+
+      - name: Optimizar assets 3D para APK (eliminar modelos crudos sin uso)
+        run: |
+          rm -rf dist/models/pc.glb dist/models/source dist/models/textures
+          ls -lh dist/models/
+
+      - name: Sincronizar proyecto nativo Android con Capacitor
+        run: |
+          if [ ! -d "android" ]; then
+            npx cap add android
+          fi
+          npx cap sync android
+
+      - name: Compilar APK instalable (Gradle assembleDebug)
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk ../IndiServ_Analytica.apk
+
+      - name: Subir APK como Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: IndiServ_Analytica-Android
+          path: IndiServ_Analytica.apk
+          if-no-files-found: error
+
+      - name: Publicar APK público en GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'android-latest' }}
+          name: IndiServ Analytica — App Android (.apk)
+          body: |
+            Descarga directa de **IndiServ Analytica para Android** (Android 8.0+):
+            - **Archivo**: `IndiServ_Analytica.apk`
+            - **Instalación**: descarga el `.apk` en tu teléfono Android, ábrelo y permite **"Instalar apps desconocidas"** cuando Android lo solicite.
+            - **Incluye**: Login/Registro con Política de Privacidad UNMSM, Escáner de dispositivo Android + Micro-Stress CPU móvil, Buscador de tickets de PC/Laptop en Supabase y Gemelo Digital 3D táctil.
+          make_latest: true
+          files: IndiServ_Analytica.apk

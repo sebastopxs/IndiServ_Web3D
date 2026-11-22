@@ -23,7 +23,7 @@ export default function TechSidebar({ selectedComponent, ticketData, onCloseComp
   // Loading skeleton
   if (!ticketData) {
     return (
-      <aside className="w-[380px] shrink-0 h-full bg-zinc-950/80 backdrop-blur-xl border-l border-white/[0.06] p-6">
+      <aside className="w-full md:w-[380px] shrink-0 h-[44vh] md:h-full bg-zinc-950/90 backdrop-blur-xl border-t md:border-t-0 md:border-l border-white/[0.06] p-6">
         <div className="animate-pulse space-y-6">
           <div className="h-8 bg-white/5 rounded-lg w-2/3" />
           <div className="h-28 bg-white/5 rounded-xl" />
@@ -74,9 +74,9 @@ export default function TechSidebar({ selectedComponent, ticketData, onCloseComp
 
   // ── RENDER ──
   return (
-    <aside className="w-[390px] shrink-0 h-full bg-zinc-950/80 backdrop-blur-xl border-l border-white/[0.06] flex flex-col overflow-hidden relative z-10 select-none">
+    <aside className="w-full md:w-[390px] shrink-0 h-[46vh] md:h-full bg-zinc-950/90 backdrop-blur-xl border-t md:border-t-0 md:border-l border-white/[0.06] flex flex-col overflow-hidden relative z-10 select-none pb-14 md:pb-0">
       {/* Scrollable content */}
-      <div className="flex-1 overflow-y-auto px-6 pt-6 pb-10 space-y-6">
+      <div className="flex-1 overflow-y-auto px-5 md:px-6 pt-5 md:pt-6 pb-10 space-y-6">
 
         {/* Header */}
         <header className="pb-5 border-b border-white/[0.06]">
