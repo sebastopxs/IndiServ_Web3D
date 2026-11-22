@@ -125,41 +125,52 @@ Responde EXCLUSIVAMENTE un objeto JSON válido con esta estructura exacta:
   "nota_fisica": "string"
 }`;
 
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 14000);
+    const cleanKey = apiKey.trim();
+    const modelsToTry = ["gemini-3-flash-preview", "gemini-flash-latest"];
+    let gData: any = null;
+    let lastStatus = 0;
 
-    const gResp = await fetch(geminiUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: controller.signal,
-      body: JSON.stringify({
-        contents: [
-          {
-            role: "user",
-            parts: [
-              { text: systemPrompt },
-              { text: `Telemetría del dispositivo:\n${JSON.stringify(telemetry, null, 2)}` },
-            ],
+    for (const modelName of modelsToTry) {
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${cleanKey}`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 14000);
+
+      const gResp = await fetch(geminiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          contents: [
+            {
+              role: "user",
+              parts: [
+                { text: systemPrompt },
+                { text: `Telemetría del dispositivo:\n${JSON.stringify(telemetry, null, 2)}` },
+              ],
+            },
+          ],
+          generationConfig: {
+            temperature: 0.15,
+            responseMimeType: "application/json",
           },
-        ],
-        generationConfig: {
-          temperature: 0.15,
-          responseMimeType: "application/json",
-        },
-      }),
-    });
-    clearTimeout(timeoutId);
+        }),
+      });
+      clearTimeout(timeoutId);
 
-    if (!gResp.ok) {
+      if (gResp.ok) {
+        gData = await gResp.json();
+        break;
+      }
+      lastStatus = gResp.status;
+    }
+
+    if (!gData) {
       const fb = buildHeuristicFallback(telemetry);
       return new Response(
-        JSON.stringify({ ...fb, aviso_ia: `Gemini HTTP ${gResp.status}; se aplicó auditoría heurística.` }),
+        JSON.stringify({ ...fb, aviso_ia: `Gemini HTTP ${lastStatus}; se aplicó auditoría heurística.` }),
         { headers: { ...CORS_HEADERS, "Content-Type": "application/json" }, status: 200 },
       );
     }
-
-    const gData = await gResp.json();
     const rawText = gData?.candidates?.[0]?.content?.parts?.[0]?.text || "";
     const parsed = JSON.parse(rawText);
 
