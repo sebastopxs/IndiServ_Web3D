@@ -21,10 +21,10 @@ export default function TicketLookupBar({ user, onSelectTicket, onRequestLogin }
     try {
       const { data, error } = await supabase
         .from('reportes_diagnostico')
-        .select('id_ticket, cpu, placa_base, health_score, fecha_creacion, specs_json')
+        .select('id_ticket, cpu, placa_base, health_score, diagnostico, fecha_creacion, specs_json')
         .eq('specs_json->>owner_dni', ownerDni)
         .order('fecha_creacion', { ascending: false })
-        .limit(20);
+        .limit(30);
       if (error) {
         console.warn('[TicketLookupBar] Error consultando tickets privados:', error.message);
         setRecent([]);
@@ -134,11 +134,20 @@ export default function TicketLookupBar({ user, onSelectTicket, onRequestLogin }
           ) : (
             recent.map((item) => {
               const tipo = item.specs_json?.tipo_equipo;
+              const evento = item.specs_json?.tipo_evento || 'Diagnóstico';
               const isPhone = tipo === 'phone';
               const isLap =
                 !isPhone &&
                 (tipo === 'laptop' ||
                   /laptop|lnvnb|fa506|7735hs|7445hs/i.test(`${item.placa_base || ''} ${item.cpu || ''}`));
+              const fechaFmt = item.fecha_creacion
+                ? new Date(item.fecha_creacion).toLocaleString('es-ES', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })
+                : '';
               return (
                 <button
                   key={item.id_ticket}
@@ -164,14 +173,21 @@ export default function TicketLookupBar({ user, onSelectTicket, onRequestLogin }
                       )}
                     </div>
                     <div className="min-w-0">
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/25">
+                          {evento}
+                        </span>
                         <span className="text-sm font-semibold text-white truncate">{item.id_ticket}</span>
-                        <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">
                           {isPhone ? 'Teléfono' : isLap ? 'Laptop' : 'PC'}
                         </span>
                       </div>
-                      <p className="text-[11px] text-slate-400 truncate mt-0.5">
-                        {item.placa_base || item.cpu || 'Equipo diagnosticado'}
+                      <p className="text-[11px] text-slate-300 truncate mt-0.5">
+                        {item.diagnostico || item.placa_base || item.cpu || 'Equipo diagnosticado'}
+                      </p>
+                      <p className="text-[10px] text-slate-500 truncate mt-0.5">
+                        {item.placa_base || item.cpu || 'Hardware'}
+                        {fechaFmt ? ` · ${fechaFmt}` : ''}
                       </p>
                     </div>
                   </div>

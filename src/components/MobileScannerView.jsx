@@ -4,6 +4,7 @@ import { Device } from '@capacitor/device';
 import { Network } from '@capacitor/network';
 import { supabase } from '../supabaseClient';
 import { runLocalDeviceAudit } from '../utils/deviceAuditFallback';
+import { recordMobileEvent } from '../utils/cloudHistory';
 import {
   Cpu, BatteryCharging, Wifi, Smartphone, MonitorPlay, Play, Square,
   Activity, RefreshCw, HardDrive, MemoryStick, ShieldCheck, Thermometer,
@@ -87,6 +88,7 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
   const [stressStatus, setStressStatus] = useState('EN ESPERA');
   const workersRef = useRef([]);
   const timerRef = useRef(null);
+  const lastScanRecordAtRef = useRef(0);
 
   const scanDevice = async () => {
     setScanning(true);
@@ -184,6 +186,24 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
       };
       setInfo(scannedData);
       onDeviceScanned?.(scannedData);
+
+      // Registrar automáticamente el escaneo en el historial privado si hay sesión
+      const nowMs = Date.now();
+      if (user?.dni && nowMs - lastScanRecordAtRef.current > 4000) {
+        lastScanRecordAtRef.current = nowMs;
+        const battOk = scannedData.batteryTempC == null || scannedData.batteryTempC < 40;
+        const storOk = scannedData.storageUsedPct == null || scannedData.storageUsedPct < 88;
+        const score = battOk && storOk ? 95 : 78;
+        recordMobileEvent({
+          user,
+          deviceInfo: scannedData,
+          tipoEvento: 'Escaneo Android',
+          prefix: 'SCAN',
+          healthScore: score,
+          diagnostico: `Escaneo de hardware — ${scannedData.displayName} (${scannedData.os})`,
+          solucion: `RAM ${scannedData.ramTotalGb ?? '?'} GB · Almacenamiento ${scannedData.storageTotalGb ?? '?'} GB · Batería ${scannedData.batteryPct ?? '?'}% (${scannedData.batteryHealth}).`,
+        });
+      }
     } finally {
       setScanning(false);
     }
@@ -201,13 +221,33 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
       const { data, error } = await supabase.functions.invoke('analizar-dispositivo-ia', {
         body: { telemetry: info },
       });
+      let auditResult;
       if (!error && data && !data.error && data.nombre_comercial) {
-        setAiAudit(data);
+        auditResult = data;
       } else {
-        setAiAudit(runLocalDeviceAudit(info));
+        auditResult = runLocalDeviceAudit(info);
+      }
+      setAiAudit(auditResult);
+      if (user?.dni && auditResult) {
+        const aiScore =
+          auditResult.veredicto === 'Original Coherente'
+            ? 96
+            : auditResult.veredicto?.includes('Modificado')
+            ? 70
+            : 45;
+        recordMobileEvent({
+          user,
+          deviceInfo: info,
+          tipoEvento: 'Auditoría IA',
+          prefix: 'IA',
+          healthScore: aiScore,
+          diagnostico: `${auditResult.nombre_comercial} — ${auditResult.veredicto} (${auditResult.confianza_pct ?? 85}%)`,
+          solucion: auditResult.resumen || 'Auditoría de autenticidad completada.',
+        });
       }
     } catch {
-      setAiAudit(runLocalDeviceAudit(info));
+      const fb = runLocalDeviceAudit(info);
+      setAiAudit(fb);
     } finally {
       setAiLoading(false);
     }
@@ -284,6 +324,21 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
           ...prev,
           `✔ Prueba completada sin bloqueos (${mops.toFixed(2)} Mops/s finales).`,
         ]);
+        if (user?.dni && info) {
+          recordMobileEvent({
+            user,
+            deviceInfo: info,
+            tipoEvento: 'Micro-Stress CPU',
+            prefix: 'STRESS',
+            healthScore: 94,
+            diagnostico: `Micro-Stress CPU Móvil (${nWorkers} hilos · ${mops.toFixed(2)} Mops/s · ESTABLE)`,
+            solucion: `Prueba de carga completada durante ${durationSec}s en ${info.cpuName || 'SoC'} sin bloqueos.`,
+          }).then((tid) => {
+            if (tid) {
+              setStressLogs((prev) => [...prev, `✔ Reporte guardado en historial privado: ${tid}`]);
+            }
+          });
+        }
       }
     }, 500);
   };

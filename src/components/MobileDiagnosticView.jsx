@@ -447,6 +447,7 @@ export default function MobileDiagnosticView({ deviceInfo, user, onOpenPhone3D }
     const ownerDni = user?.dni ? String(user.dni).trim() : null;
     const specsJson = {
       tipo_equipo: 'phone',
+      tipo_evento: 'Árbol Diagnóstico',
       owner_dni: ownerDni,
       owner_nick: user?.nickname || null,
       modelo_comercial: deviceInfo?.displayName || 'Smartphone Android',
