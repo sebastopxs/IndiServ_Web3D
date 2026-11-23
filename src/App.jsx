@@ -452,7 +452,11 @@ export default function App() {
         </div>
       ) : activeTab === 'tickets' ? (
         <div className="flex-1 overflow-hidden">
-          <TicketLookupBar onSelectTicket={handleSelectTicketFromMobile} />
+          <TicketLookupBar
+            user={authUser}
+            onSelectTicket={handleSelectTicketFromMobile}
+            onRequestLogin={() => setGuestUnlocked(false)}
+          />
         </div>
       ) : (
         <>

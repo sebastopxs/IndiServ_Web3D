@@ -444,8 +444,11 @@ export default function MobileDiagnosticView({ deviceInfo, user, onOpenPhone3D }
       ? `Batería ${deviceInfo.batteryPct}% · ${deviceInfo.batteryHealth}${deviceInfo.batteryTempC != null ? ` · ${deviceInfo.batteryTempC}°C` : ''}`
       : 'Batería Li-ion Smartphone';
 
+    const ownerDni = user?.dni ? String(user.dni).trim() : null;
     const specsJson = {
       tipo_equipo: 'phone',
+      owner_dni: ownerDni,
+      owner_nick: user?.nickname || null,
       modelo_comercial: deviceInfo?.displayName || 'Smartphone Android',
       so: deviceInfo?.os || 'Android',
       bateria: {
@@ -460,36 +463,40 @@ export default function MobileDiagnosticView({ deviceInfo, user, onOpenPhone3D }
       codigo_diagnostico: selectedCase.code,
     };
 
-    try {
-      const { error } = await supabase.from('reportes_diagnostico').upsert(
-        {
-          id_ticket: ticketId,
-          usuario_nick: user?.nickname || 'ANDROID-MOVIL',
-          cpu: cpuLabel,
-          ram: ramLabel,
-          gpu: gpuLabel,
-          almacenamiento: storageLabel,
-          placa_base: boardLabel,
-          refrigeracion: batteryLabel,
-          health_score: healthScore,
-          diagnostico: `[${selectedCase.code}] ${selectedCase.diagnosis}`,
-          solucion: solucionText,
-          specs_json: specsJson,
-        },
-        { onConflict: 'id_ticket' }
-      );
-
-      if (error) {
-        console.warn('[MobileDiagnosticView] Error sincronizando ticket:', error.message);
-        setSaveError('Guardado local (sin conexión a Supabase).');
-      } else {
-        setSavedTicketId(ticketId);
-      }
-    } catch (err) {
-      console.warn('[MobileDiagnosticView] Excepción Supabase:', err);
-      setSaveError('Modo sin conexión: el modelo 3D se cargará localmente.');
-    } finally {
+    if (!ownerDni) {
       setSavingTicket(false);
+      setSaveError('Inicia sesión con tu cuenta para guardar tickets privados en la nube (el Visor 3D funciona localmente).');
+    } else {
+      try {
+        const { error } = await supabase.from('reportes_diagnostico').upsert(
+          {
+            id_ticket: ticketId,
+            cpu: cpuLabel,
+            ram: ramLabel,
+            gpu: gpuLabel,
+            almacenamiento: storageLabel,
+            placa_base: boardLabel,
+            refrigeracion: batteryLabel,
+            health_score: healthScore,
+            diagnostico: `[${selectedCase.code}] ${selectedCase.diagnosis}`,
+            solucion: solucionText,
+            specs_json: specsJson,
+          },
+          { onConflict: 'id_ticket' }
+        );
+
+        if (error) {
+          console.warn('[MobileDiagnosticView] Error sincronizando ticket:', error.message);
+          setSaveError('No se pudo sincronizar con Supabase. El modelo 3D se cargará localmente.');
+        } else {
+          setSavedTicketId(ticketId);
+        }
+      } catch (err) {
+        console.warn('[MobileDiagnosticView] Excepción Supabase:', err);
+        setSaveError('Modo sin conexión: el modelo 3D se cargará localmente.');
+      } finally {
+        setSavingTicket(false);
+      }
     }
 
     if (open3DAfter && onOpenPhone3D) {
