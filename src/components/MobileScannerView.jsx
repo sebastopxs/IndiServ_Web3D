@@ -606,6 +606,12 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
                   </div>
                 )}
 
+                {aiAudit.aviso_ia && (
+                  <p className="text-[10px] text-amber-400/90 bg-amber-500/10 border border-amber-500/20 rounded-lg px-2.5 py-1.5">
+                    ⚠ {aiAudit.aviso_ia}
+                  </p>
+                )}
+
                 {aiAudit.nota_fisica && (
                   <p className="text-[10px] text-slate-500 italic leading-relaxed border-t border-slate-800/80 pt-2">
                     ℹ {aiAudit.nota_fisica}

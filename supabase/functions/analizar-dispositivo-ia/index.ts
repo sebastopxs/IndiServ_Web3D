@@ -130,42 +130,52 @@ Responde EXCLUSIVAMENTE un objeto JSON válido con esta estructura exacta:
 }`;
 
     const cleanKey = apiKey.trim();
-    const modelsToTry = ["gemini-3-flash-preview", "gemini-flash-latest"];
+    const modelsToTry = [
+      "gemini-3.5-flash-lite",
+      "gemini-flash-lite-latest",
+      "gemini-3-flash-preview",
+      "gemini-flash-latest",
+    ];
     let gData: any = null;
     let lastStatus = 0;
 
     for (const modelName of modelsToTry) {
       const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${cleanKey}`;
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 14000);
+      const timeoutId = setTimeout(() => controller.abort(), 12000);
 
-      const gResp = await fetch(geminiUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal: controller.signal,
-        body: JSON.stringify({
-          contents: [
-            {
-              role: "user",
-              parts: [
-                { text: systemPrompt },
-                { text: `Telemetría del dispositivo:\n${JSON.stringify(telemetry, null, 2)}` },
-              ],
+      try {
+        const gResp = await fetch(geminiUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            contents: [
+              {
+                role: "user",
+                parts: [
+                  { text: systemPrompt },
+                  { text: `Telemetría del dispositivo:\n${JSON.stringify(telemetry, null, 2)}` },
+                ],
+              },
+            ],
+            generationConfig: {
+              temperature: 0.15,
+              responseMimeType: "application/json",
             },
-          ],
-          generationConfig: {
-            temperature: 0.15,
-            responseMimeType: "application/json",
-          },
-        }),
-      });
-      clearTimeout(timeoutId);
+          }),
+        });
+        clearTimeout(timeoutId);
 
-      if (gResp.ok) {
-        gData = await gResp.json();
-        break;
+        if (gResp.ok) {
+          gData = await gResp.json();
+          break;
+        }
+        lastStatus = gResp.status;
+      } catch {
+        clearTimeout(timeoutId);
+        lastStatus = 504;
       }
-      lastStatus = gResp.status;
     }
 
     if (!gData) {
