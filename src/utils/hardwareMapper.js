@@ -50,17 +50,14 @@ export function mapTelemetryTo3DProfile(telemetry) {
 
   const components = telemetry.components || {};
 
-  // GPU: evaluar columna 'gpu' o propiedad de componente
   const gpuRaw = telemetry.gpu || components['Tarjeta Gráfica']?.specs || '';
   const hasDiscreteGpu = gpuRaw && !gpuRaw.toLowerCase().includes('integrada');
   const gpuFile = hasDiscreteGpu ? classifyGpu(gpuRaw) : null;
 
-  // CPU y Cooler: evaluar columnas 'cpu' y 'refrigeracion' o componentes
   const cpuRaw = telemetry.cpu || components['Procesador/Refrigeración']?.specs || '';
   const coolerRaw = telemetry.refrigeracion || components['Procesador/Refrigeración']?.cooler_type || '';
   const coolerFile = classifyCooler(coolerRaw, cpuRaw);
 
-  // RAM: evaluar columna 'ram' para número de ranuras ocupadas
   const ramRaw = telemetry.ram || components['Memoria RAM']?.specs || '';
   let ramSlots = 2;
   if (ramRaw.includes('4 ranuras') || ramRaw.includes('4 ×') || ramRaw.includes('4x')) {
@@ -74,7 +71,6 @@ export function mapTelemetryTo3DProfile(telemetry) {
   const ramFile = '/models/archetypes/ram_dimm.glb';
   const mbFile = '/models/archetypes/motherboard_atx.glb';
 
-  // Tipo de equipo ('phone' | 'laptop' | 'desktop') desde specs_json con inferencia de respaldo para tickets previos
   const explicitTipo = (
     telemetry.specs_json?.tipo_equipo ||
     telemetry.tipo_equipo ||
@@ -165,7 +161,6 @@ export function mapTelemetryTo3DProfile(telemetry) {
     diagnostico: telemetry.diagnostico,
     solucion: telemetry.solucion,
 
-    // 3D Assembly Manifest
     parts: {
       chassis: { file: chassisFile, position: [0, 0, 0], explodedOffset: [0, 0, 0], meta: {} },
       motherboard: { file: mbFile, position: [0, 0, 0], explodedOffset: [0, 0, -3], meta: mbDiag },

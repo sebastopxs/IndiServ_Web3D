@@ -1,3 +1,7 @@
+/**
+ * ChassisScene.jsx — Escena WebGL (React Three Fiber) con iluminación, cámara, sombras y controles orbitales.
+ */
+
 import React, { Suspense, useRef, useEffect } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Environment, Bounds, ContactShadows, useBounds, Center, Html, useProgress, Grid } from '@react-three/drei';
@@ -30,22 +34,22 @@ function FocusWrapper({ children }) {
   const api = useBounds();
   return (
     <group
-      onClick={(e) => { 
-        e.stopPropagation(); 
+      onClick={(e) => {
+        e.stopPropagation();
         if (e.delta <= 2 && e.object) {
           try {
-            api.refresh(e.object).fit(); 
+            api.refresh(e.object).fit();
           } catch (err) {
             console.warn("Bounds could not calculate fit for this object.");
           }
         }
       }}
-      onPointerMissed={(e) => { 
+      onPointerMissed={(e) => {
         if (e.button === 0) {
           try {
-            api.refresh().fit(); 
+            api.refresh().fit();
           } catch (err) {
-            // Ignore if fit fails
+
           }
         }
       }}
@@ -78,13 +82,12 @@ export default function ChassisScene({ profile, telemetry, onSelectComponent, ex
         shadows
         camera={{ position: [-12, 7, 14], fov: 38 }}
         dpr={[1, 1.5]}
-        // Optimization: disable antialias to save massive VRAM, require high-performance GPU
+
         gl={{ powerPreference: 'high-performance', antialias: false, preserveDrawingBuffer: false }}
       >
         <color attach="background" args={['#09090b']} />
         <fog attach="fog" args={['#09090b', 25, 55]} />
 
-        {/* Studio lighting — neutral three-point */}
         <ambientLight intensity={0.35} />
         <directionalLight position={[12, 18, 10]} intensity={2.2} castShadow shadow-bias={-0.0001} shadow-mapSize={[1024, 1024]} />
         <directionalLight position={[-8, 6, -12]} intensity={0.8} color="#e2e8f0" />
@@ -105,7 +108,6 @@ export default function ChassisScene({ profile, telemetry, onSelectComponent, ex
             </FocusWrapper>
           </Bounds>
 
-          {/* Subtle technical grid with raycast disabled to prevent interference */}
           <Grid
             renderOrder={-1}
             position={[0, -4.5, 0]}
@@ -119,15 +121,15 @@ export default function ChassisScene({ profile, telemetry, onSelectComponent, ex
             fadeDistance={35}
             raycast={() => null}
           />
-          <ContactShadows 
-            resolution={512} 
-            frames={1} 
-            scale={35} 
-            blur={2} 
-            opacity={0.45} 
-            far={8} 
-            color="#000" 
-            position={[0, -4.5, 0]} 
+          <ContactShadows
+            resolution={512}
+            frames={1}
+            scale={35}
+            blur={2}
+            opacity={0.45}
+            far={8}
+            color="#000"
+            position={[0, -4.5, 0]}
             raycast={() => null}
           />
           <Environment preset="city" />

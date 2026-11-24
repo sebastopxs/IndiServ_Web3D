@@ -1,5 +1,8 @@
 package com.indiserv.analytica;
 
+/**
+ * HardwareInfoPlugin — Plugin Capacitor nativo para telemetría Android (SoC, clústeres CPU-Z, RAM, batería e integridad).
+ */
 import android.app.ActivityManager;
 import android.content.Context;
 import android.content.Intent;
@@ -65,7 +68,7 @@ public class HardwareInfoPlugin extends Plugin {
         String p = part == null ? "" : part.toLowerCase(Locale.ROOT).trim();
         if (imp.isEmpty() || p.isEmpty()) return "";
 
-        if (imp.equals("0x41")) { // ARM Ltd.
+        if (imp.equals("0x41")) {
             switch (p) {
                 case "0xd85": return "ARM Cortex-X925";
                 case "0xd82": return "ARM Cortex-X5";
@@ -92,15 +95,15 @@ public class HardwareInfoPlugin extends Plugin {
                 case "0xd04": return "ARM Cortex-A35";
                 default: return "ARM Core (" + p + ")";
             }
-        } else if (imp.equals("0x51")) { // Qualcomm
+        } else if (imp.equals("0x51")) {
             if (p.equals("0x001") || p.equals("0x002")) return "Qualcomm Oryon";
             if (p.equals("0x804") || p.equals("0x805")) return "Qualcomm Kryo 4xx/5xx";
             if (p.equals("0x802") || p.equals("0x803")) return "Qualcomm Kryo 385";
             if (p.equals("0x800") || p.equals("0x801")) return "Qualcomm Kryo 2xx";
             return "Qualcomm Kryo (" + p + ")";
-        } else if (imp.equals("0x53")) { // Samsung
+        } else if (imp.equals("0x53")) {
             return "Samsung Exynos M (" + p + ")";
-        } else if (imp.equals("0x48")) { // HiSilicon
+        } else if (imp.equals("0x48")) {
             return "HiSilicon TaiShan (" + p + ")";
         }
         return "";
@@ -323,7 +326,6 @@ public class HardwareInfoPlugin extends Plugin {
         Context ctx = getContext();
         JSObject ret = new JSObject();
 
-        // 1. Identidad ampliada del dispositivo (OEM marketname + Settings.Global)
         String marketName = firstNonEmptyProp(
             "ro.product.marketname",
             "ro.product.vendor.marketname",
@@ -353,7 +355,6 @@ public class HardwareInfoPlugin extends Plugin {
         ret.put("marketName", marketName);
         ret.put("deviceNameSetting", deviceNameSetting);
 
-        // 2. Procesador (SoC), Arquitectura y Clústeres estilo CPU-Z
         String socManuf = "";
         String socModel = "";
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -415,7 +416,6 @@ public class HardwareInfoPlugin extends Plugin {
         ret.put("cpuClusters", cpuClusters);
         ret.put("cpuGovernor", cpuGovernor);
 
-        // 3. Memoria RAM Real (ActivityManager)
         try {
             ActivityManager am = (ActivityManager) ctx.getSystemService(Context.ACTIVITY_SERVICE);
             ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
@@ -432,7 +432,6 @@ public class HardwareInfoPlugin extends Plugin {
         } catch (Exception ignored) {
         }
 
-        // 4. Almacenamiento Interno Real (StatFs)
         try {
             File path = Environment.getDataDirectory();
             StatFs stat = new StatFs(path.getPath());
@@ -451,7 +450,6 @@ public class HardwareInfoPlugin extends Plugin {
         } catch (Exception ignored) {
         }
 
-        // 5. Batería Real, Temperatura, Voltaje, Tecnología, Fuente y Corriente
         try {
             IntentFilter ifilter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
             Intent batteryStatus = ctx.registerReceiver(null, ifilter);
@@ -494,7 +492,6 @@ public class HardwareInfoPlugin extends Plugin {
         } catch (Exception ignored) {
         }
 
-        // 6. Pantalla física, Tasa de Refresco (Hz) y Detección de Tablet
         boolean isTablet = false;
         double diagInches = 0.0;
         try {
@@ -526,7 +523,6 @@ public class HardwareInfoPlugin extends Plugin {
         ret.put("isTablet", isTablet);
         ret.put("screenDiagonalInches", diagInches);
 
-        // 7. Integridad de Sistema (Bootloader, Tags, Root, Emulador)
         String buildTags = Build.TAGS != null ? Build.TAGS : "unknown";
         String verifiedBoot = getSystemProp("ro.boot.verifiedbootstate");
         if (verifiedBoot.isEmpty()) verifiedBoot = "unknown";
@@ -537,7 +533,6 @@ public class HardwareInfoPlugin extends Plugin {
         ret.put("isRooted", detectRoot());
         ret.put("isEmulator", detectEmulator());
 
-        // 8. Sistema Operativo y Kernel
         ret.put("androidRelease", Build.VERSION.RELEASE != null ? Build.VERSION.RELEASE : "?");
         ret.put("sdkInt", Build.VERSION.SDK_INT);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {

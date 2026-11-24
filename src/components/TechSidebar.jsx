@@ -1,3 +1,7 @@
+/**
+ * TechSidebar.jsx — Panel técnico de inspección de componentes, especificaciones y diagnóstico en el visor 3D.
+ */
+
 import React from 'react';
 import {
   Cpu, HardDrive, MemoryStick, MonitorPlay, Server, Zap, Wrench,
@@ -20,7 +24,7 @@ function StatusDot({ ok }) {
 }
 
 export default function TechSidebar({ selectedComponent, ticketData, onCloseComponent }) {
-  // Loading skeleton
+
   if (!ticketData) {
     return (
       <aside className="w-full md:w-[380px] shrink-0 h-[44vh] md:h-full bg-zinc-950/90 backdrop-blur-xl border-t md:border-t-0 md:border-l border-white/[0.06] p-6">
@@ -39,7 +43,6 @@ export default function TechSidebar({ selectedComponent, ticketData, onCloseComp
     : 100;
   const isOptimal = healthScore >= 80;
 
-  // Checklist de auditoría dinámica
   const checks = [];
   if (ticketData.diagnostico) {
     checks.push({
@@ -72,13 +75,11 @@ export default function TechSidebar({ selectedComponent, ticketData, onCloseComp
     checks.push({ ok: true, label: 'Auditoría completada sin alertas críticas' });
   }
 
-  // ── RENDER ──
   return (
     <aside className="w-full md:w-[390px] shrink-0 h-[46vh] md:h-full bg-zinc-950/90 backdrop-blur-xl border-t md:border-t-0 md:border-l border-white/[0.06] flex flex-col overflow-hidden relative z-10 select-none pb-14 md:pb-0">
-      {/* Scrollable content */}
+
       <div className="flex-1 overflow-y-auto px-5 md:px-6 pt-5 md:pt-6 pb-10 space-y-6">
 
-        {/* Header */}
         <header className="pb-5 border-b border-white/[0.06]">
           <div className="flex items-center justify-between">
             <h2 className="text-[15px] font-semibold text-white tracking-tight truncate max-w-[240px]">
@@ -94,9 +95,9 @@ export default function TechSidebar({ selectedComponent, ticketData, onCloseComp
         </header>
 
         {!selectedComponent ? (
-          /* ─── VISTA GENERAL: Resumen Dinámico ─── */
+
           <>
-            {/* Health Score */}
+
             <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-5">
               <div className="flex items-start justify-between">
                 <div>
@@ -117,7 +118,6 @@ export default function TechSidebar({ selectedComponent, ticketData, onCloseComp
               </div>
             </div>
 
-            {/* Configuración Base Dinámica */}
             <div className="space-y-3">
               <h3 className="text-[10px] text-zinc-500 uppercase tracking-widest font-semibold">Configuración Base Detectada</h3>
               <div className="bg-white/[0.02] border border-white/[0.05] rounded-xl p-4 space-y-3">
@@ -160,7 +160,6 @@ export default function TechSidebar({ selectedComponent, ticketData, onCloseComp
               </div>
             </div>
 
-            {/* Dictamen de Diagnóstico y Solución de Supabase */}
             {ticketData.diagnostico && (
               <div className="space-y-3">
                 <h3 className="text-[10px] text-zinc-500 uppercase tracking-widest font-semibold flex items-center gap-1.5">
@@ -187,7 +186,6 @@ export default function TechSidebar({ selectedComponent, ticketData, onCloseComp
               </div>
             )}
 
-            {/* Diagnostic Checks */}
             <div className="space-y-3">
               <h3 className="text-[10px] text-zinc-500 uppercase tracking-widest font-semibold flex items-center gap-1.5">
                 <ShieldCheck className="w-3.5 h-3.5" /> Puntos de Auditoría
@@ -206,7 +204,6 @@ export default function TechSidebar({ selectedComponent, ticketData, onCloseComp
               </div>
             </div>
 
-            {/* Component quick-list */}
             <div className="space-y-2 pt-2">
               <h3 className="text-[10px] text-zinc-500 uppercase tracking-widest font-semibold">
                 Componentes Auditados (Clic para Inspeccionar)
@@ -233,7 +230,7 @@ export default function TechSidebar({ selectedComponent, ticketData, onCloseComp
             </div>
           </>
         ) : (
-          /* ─── INSPECCIÓN DETALLADA: Componente Seleccionado ─── */
+
           <>
             <button
               onClick={() => onCloseComponent(null, 'close')}
@@ -243,7 +240,7 @@ export default function TechSidebar({ selectedComponent, ticketData, onCloseComp
             </button>
 
             <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-5 space-y-5">
-              {/* Part header */}
+
               <div className="flex items-start gap-3 pb-4 border-b border-white/[0.06]">
                 {(() => {
                   const entry = ICON_MAP[selectedComponent.category] || { icon: Wrench, color: 'text-zinc-400' };
@@ -256,7 +253,6 @@ export default function TechSidebar({ selectedComponent, ticketData, onCloseComp
                 </div>
               </div>
 
-              {/* Specifications */}
               <div>
                 <h4 className="text-[10px] text-zinc-500 uppercase tracking-widest font-semibold mb-2">Especificaciones Técnicas</h4>
                 <p className="text-xs text-zinc-200 leading-relaxed font-medium bg-white/[0.02] p-3 rounded-lg border border-white/[0.04]">
@@ -264,7 +260,6 @@ export default function TechSidebar({ selectedComponent, ticketData, onCloseComp
                 </p>
               </div>
 
-              {/* Audit Verdict */}
               <div className="bg-white/[0.02] border border-white/[0.05] rounded-lg p-4">
                 <h4 className="text-[10px] text-zinc-500 uppercase tracking-widest font-semibold mb-2 flex items-center gap-1.5">
                   <Activity className="w-3 h-3 text-cyan-400" /> Dictamen de Auditoría
@@ -274,7 +269,6 @@ export default function TechSidebar({ selectedComponent, ticketData, onCloseComp
                 </p>
               </div>
 
-              {/* Recommendation */}
               <div className="bg-emerald-500/[0.04] border border-emerald-500/10 rounded-lg p-4">
                 <h4 className="text-[10px] text-emerald-400/90 uppercase tracking-widest font-semibold mb-2 flex items-center gap-1.5">
                   <CheckCircle2 className="w-3 h-3" /> Recomendación Técnica

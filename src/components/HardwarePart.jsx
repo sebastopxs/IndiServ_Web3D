@@ -1,3 +1,7 @@
+/**
+ * HardwarePart.jsx — Componente de malla 3D reutilizable con soporte de animación de vista explosionada.
+ */
+
 import React, { useCallback, useMemo } from 'react';
 import { useGLTF } from '@react-three/drei';
 
@@ -26,7 +30,6 @@ function PartMesh({ file, partData, onSelect }) {
     return null;
   }
 
-  // Set shadows once on mount
   useMemo(() => {
     if (gltf?.scene) {
       gltf.scene.traverse((child) => {

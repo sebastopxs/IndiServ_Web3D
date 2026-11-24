@@ -5,7 +5,7 @@ import HardwarePart from './HardwarePart';
 
 /**
  * HardwareAssembler
- * 
+ *
  * Ultra-optimized:
  * - NO scene.clone(true)
  * - NO material mutation or scene.traverse inside selection events
@@ -91,11 +91,9 @@ function detectCategory(object) {
 }
 
 function SceneMesh({ modelPath, profile, telemetry, onSelect, explodedView }) {
-  // Use the cached scene immutably.
+
   const { scene } = useGLTF(modelPath);
 
-  // One initial setup per loaded scene to cache original positions for the exploded view.
-  // Never modifies materials or clones the scene.
   useMemo(() => {
     scene.traverse((child) => {
       if (child.isMesh) {
@@ -112,7 +110,6 @@ function SceneMesh({ modelPath, profile, telemetry, onSelect, explodedView }) {
     });
   }, [scene]);
 
-  // Pure WebGL animation hook, bypassing React renders
   useFrame((_, delta) => {
     scene.traverse((child) => {
       if (child.isMesh && child.userData._origPos) {

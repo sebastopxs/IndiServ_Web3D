@@ -1,5 +1,8 @@
 package com.indiserv.analytica;
 
+/**
+ * MaintenancePlugin — Plugin Capacitor nativo para sensores térmicos, caché interna, UsageStats y limpieza segura.
+ */
 import android.Manifest;
 import android.app.ActivityManager;
 import android.app.AppOpsManager;
@@ -151,7 +154,6 @@ public class MaintenancePlugin extends Plugin {
             String relLower = fileCanonical.substring(rootCanonical.length() + 1).toLowerCase(Locale.ROOT);
             if (relLower.contains("..")) return false;
 
-            // Bloquear carpetas críticas del sistema y fotos personales
             if (relLower.startsWith("android/")
                 || relLower.startsWith("android\\")
                 || relLower.startsWith("dcim/camera")
@@ -162,7 +164,6 @@ public class MaintenancePlugin extends Plugin {
                 return false;
             }
 
-            // Permitir únicamente dentro de carpetas seguras de usuario (Download / Documents)
             return relLower.startsWith("download/")
                 || relLower.startsWith("download\\")
                 || relLower.startsWith("downloads/")
@@ -231,16 +232,11 @@ public class MaintenancePlugin extends Plugin {
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // NIVEL 1 — SIN PERMISOS INVASIVOS
-    // ═══════════════════════════════════════════════════════════════════════
-
     @PluginMethod
     public void getThermalSnapshot(PluginCall call) {
         Context ctx = getContext();
         JSObject ret = new JSObject();
 
-        // Batería, temperatura, voltaje y corriente
         try {
             IntentFilter ifilter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
             Intent batteryStatus = ctx.registerReceiver(null, ifilter);
@@ -271,7 +267,6 @@ public class MaintenancePlugin extends Plugin {
         } catch (Exception ignored) {
         }
 
-        // RAM libre y usada
         try {
             ActivityManager am = (ActivityManager) ctx.getSystemService(Context.ACTIVITY_SERVICE);
             ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
@@ -287,7 +282,6 @@ public class MaintenancePlugin extends Plugin {
         } catch (Exception ignored) {
         }
 
-        // Estado térmico oficial de Android (API 29+)
         String thermalStatus = "Nominal";
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -300,7 +294,6 @@ public class MaintenancePlugin extends Plugin {
         }
         ret.put("thermalStatus", thermalStatus);
 
-        // Tamaño actual de caché interna de IndiServ
         long cacheBytes = getDirSizeBytes(ctx.getCacheDir()) + getDirSizeBytes(ctx.getExternalCacheDir());
         ret.put("appCacheKb", Math.round(cacheBytes / 1024.0));
         ret.put("timestamp", System.currentTimeMillis());
@@ -397,10 +390,6 @@ public class MaintenancePlugin extends Plugin {
             call.reject("No se pudo abrir la ficha de la aplicación: " + e.getMessage());
         }
     }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // NIVEL 2 — PERMISOS EXPLÍCITOS EN AJUSTES
-    // ═══════════════════════════════════════════════════════════════════════
 
     @PluginMethod
     public void getPermissionStatus(PluginCall call) {
@@ -504,7 +493,7 @@ public class MaintenancePlugin extends Plugin {
             if (pkg.equals(ownPkg) || pkg.startsWith("com.android.systemui") || pkg.contains("launcher")) {
                 continue;
             }
-            if (fgMs < 60_000L) continue; // Ignorar trazas < 1 minuto
+            if (fgMs < 60_000L) continue;
 
             String appName = pkg;
             boolean isCoreSystem = false;
@@ -516,12 +505,12 @@ public class MaintenancePlugin extends Plugin {
                 }
                 boolean isSystem = (ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
                 boolean isUpdatedSystem = (ai.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0;
-                // Filtrar servicios puros de sistema que no tienen ícono de lanzamiento
+
                 if (isSystem && !isUpdatedSystem && pm.getLaunchIntentForPackage(pkg) == null) {
                     isCoreSystem = true;
                 }
             } catch (PackageManager.NameNotFoundException ignored) {
-                // Conservar nombre de paquete si no es visible por visibilidad Android 11+
+
             }
 
             if (isCoreSystem) continue;

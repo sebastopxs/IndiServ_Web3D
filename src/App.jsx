@@ -1,3 +1,8 @@
+/**
+ * App.jsx — Componente raíz de IndiServ Web3D y APK Android.
+ * Coordina autenticación, escáner nativo, diagnóstico, mantenimiento, tickets privados y visor 3D.
+ */
+
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { Capacitor } from '@capacitor/core';
 import ChassisScene from './components/ChassisScene';
@@ -14,9 +19,6 @@ import {
   Box, Search, Smartphone, LogOut, Stethoscope, Snowflake, ArrowLeft,
 } from 'lucide-react';
 
-/* ═══════════════════════════════════════════
-   Fallback Mock Data (solo cuando NO hay ticket en URL)
-   ═══════════════════════════════════════════ */
 const FALLBACK = {
   id_ticket: 'TKT-DEMO-OFFLINE',
   ticket_id: 'TKT-DEMO-OFFLINE',
@@ -167,9 +169,6 @@ function formatSupabaseTelemetry(data) {
   };
 }
 
-/* ═══════════════════════════════════════════
-   WebGL Error Boundary
-   ═══════════════════════════════════════════ */
 class CanvasErrorBoundary extends React.Component {
   state = { hasError: false };
   static getDerivedStateFromError() { return { hasError: true }; }
@@ -192,16 +191,12 @@ class CanvasErrorBoundary extends React.Component {
   }
 }
 
-// Memoized ChassisScene to completely decouple 3D rendering from UI state changes
 const MemoizedChassisScene = React.memo(ChassisScene, (prevProps, nextProps) => {
-  return prevProps.explodedView === nextProps.explodedView 
+  return prevProps.explodedView === nextProps.explodedView
       && prevProps.telemetry === nextProps.telemetry
       && prevProps.profile === nextProps.profile;
 });
 
-/* ═══════════════════════════════════════════
-   App Principal
-   ═══════════════════════════════════════════ */
 export default function App() {
   const isNativeApp = useMemo(() => {
     try {
@@ -216,7 +211,6 @@ export default function App() {
     []
   );
 
-  // Autenticación solo requerida al iniciar como APK nativo (enlaces públicos ?ticket= de Vercel entran directo)
   const [authUser, setAuthUser] = useState(null);
   const [guestUnlocked, setGuestUnlocked] = useState(!isNativeApp || Boolean(initialTicketParam));
   const [activeTab, setActiveTab] = useState(isNativeApp && !initialTicketParam ? 'scanner' : '3d');
@@ -245,7 +239,6 @@ export default function App() {
     return false;
   }, [tabHistory, activeTab, isNativeApp, initialTicketParam]);
 
-  // Puente para botón/gesto físico Atrás de Android (invocado desde MainActivity.java)
   useEffect(() => {
     window.__indiservHandleBack = () => {
       const handled = goBackTab();
@@ -260,14 +253,12 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [isLive, setIsLive] = useState(false);
   const [statusMessage, setStatusMessage] = useState(null);
-  
-  // UI State
+
   const [selectedComponent, setSelectedComponent] = useState(null);
   const [explodedView, setExplodedView] = useState(false);
   const [showCase, setShowCase] = useState(true);
   const [resetCameraFn, setResetCameraFn] = useState(null);
 
-  // Build 3D profile from telemetry
   const profile = useMemo(() => mapTelemetryTo3DProfile(telemetry), [telemetry]);
 
   const loadTicketById = useCallback(async (ticketIdRaw, tipoParam = '') => {
@@ -326,7 +317,6 @@ export default function App() {
     }
   }, []);
 
-  /* ── Carga inicial desde URL (?ticket=... / ?tipo=...) ── */
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const ticketParam = params.get('ticket')?.trim() || '';
@@ -461,7 +451,6 @@ export default function App() {
     }
   }, [mobileDeviceInfo, telemetry, handleOpenPhone3D, navigateToTab]);
 
-  // Pantalla de Login/Registro en APK Android nativo (cuando aún no inicia sesión)
   if (!guestUnlocked && !authUser) {
     return (
       <MobileAuthView
@@ -481,7 +470,7 @@ export default function App() {
 
   return (
     <div className="w-screen h-screen flex flex-col md:flex-row bg-zinc-950 font-sans text-zinc-100 overflow-hidden relative">
-      {/* ── Rail Lateral Persistente para Tablets y Pantallas Medianas/Grandes (>= md) ── */}
+
       {showAppNav && (
         <aside className="hidden md:flex flex-col items-center justify-between w-[76px] shrink-0 bg-[#0f172a] border-r border-white/10 py-3 px-1.5 z-30">
           <div className="flex flex-col items-center gap-2 w-full">
@@ -596,7 +585,7 @@ export default function App() {
         </div>
       ) : (
         <>
-          {/* ── 3D Viewport ── */}
+
           <div className="flex-1 relative min-h-[48vh]">
             {loading ? (
               <div className="absolute inset-0 flex items-center justify-center">
@@ -617,9 +606,8 @@ export default function App() {
               </CanvasErrorBoundary>
             )}
 
-            {/* ── Top bar ── */}
             <div className="absolute top-0 left-0 right-0 pointer-events-none z-10 p-3 md:p-5 flex flex-wrap items-start justify-between gap-2">
-              {/* Brand, Back & Connection Status */}
+
               <div className="pointer-events-auto flex items-center gap-2 bg-zinc-950/75 backdrop-blur-md border border-white/[0.06] rounded-xl px-3 md:px-4 py-2 md:py-3 shadow-lg">
                 {canGoBack && (
                   <button
@@ -653,7 +641,6 @@ export default function App() {
                 )}
               </div>
 
-              {/* Toolbar */}
               <div className="pointer-events-auto flex items-center gap-1.5 bg-zinc-950/75 backdrop-blur-md border border-white/[0.06] rounded-xl px-2 py-1.5 shadow-lg">
                 <ToolbarBtn
                   icon={
@@ -686,7 +673,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* ── Sidebar (Derecha en Desktop, Inferior en Móvil) ── */}
           <TechSidebar
             selectedComponent={selectedComponent}
             ticketData={telemetry}
@@ -695,7 +681,6 @@ export default function App() {
         </>
       )}
 
-      {/* ── Barra de Navegación Inferior (Visible en Teléfonos < md) ── */}
       {showAppNav && (
         <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-[#0f172a]/95 backdrop-blur-xl border-t border-white/10 px-1 py-2 flex items-center justify-around">
           <MobileNavBtn icon={Smartphone} label="Android" active={activeTab === 'scanner'} onClick={() => navigateToTab('scanner')} />
@@ -751,7 +736,6 @@ function MobileNavBtn({ icon: Icon, label, active, onClick }) {
   );
 }
 
-/* Small toolbar button */
 function ToolbarBtn({ icon: Icon, label, active, onClick }) {
   return (
     <button

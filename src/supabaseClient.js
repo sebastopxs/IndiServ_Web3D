@@ -1,3 +1,7 @@
+/**
+ * supabaseClient.js — Cliente compartido de Supabase para consultas de telemetría y Edge Functions.
+ */
+
 import { createClient } from '@supabase/supabase-js'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://pvrfnvrxaxulcxacdino.supabase.co'

@@ -1,3 +1,7 @@
+/**
+ * MobileScannerView.jsx — Vista de telemetría nativa Android, perfil CPU-Z, auditoría IA y Micro-Stress Test.
+ */
+
 import React, { useEffect, useRef, useState } from 'react';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { Device } from '@capacitor/device';
@@ -82,11 +86,9 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
   const [info, setInfo] = useState(null);
   const [scanning, setScanning] = useState(true);
 
-  // Auditoría con IA (Modelo comercial + autenticidad de piezas)
   const [aiLoading, setAiLoading] = useState(false);
   const [aiAudit, setAiAudit] = useState(null);
 
-  // Micro-Stress CPU con Web Workers
   const [stressRunning, setStressRunning] = useState(false);
   const [stressProgress, setStressProgress] = useState(0);
   const [stressMops, setStressMops] = useState(0);
@@ -232,7 +234,6 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
       setInfo(scannedData);
       onDeviceScanned?.(scannedData);
 
-      // Auto-enriquecimiento silencioso en segundo plano (y caché en localStorage) si no estaba en catálogo local
       if (
         Capacitor.isNativePlatform() &&
         netInfo.connected &&
@@ -275,7 +276,6 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
           .catch(() => {});
       }
 
-      // Registrar automáticamente el escaneo en el historial privado si hay sesión
       const nowMs = Date.now();
       if (user?.dni && nowMs - lastScanRecordAtRef.current > 4000) {
         lastScanRecordAtRef.current = nowMs;
@@ -445,7 +445,7 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
   return (
     <div className="h-full w-full overflow-y-auto bg-[#0b0f19] text-zinc-100 p-4 pb-24">
       <div className="max-w-2xl mx-auto space-y-3.5">
-        {/* Header Identidad Comercial del Modelo (Teléfono / Tablet) */}
+
         <div className="flex items-center justify-between bg-[#131c2e] border border-slate-800 rounded-2xl p-4">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-1.5">
@@ -486,10 +486,9 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
           </button>
         </div>
 
-        {/* Telemetría Profunda */}
         {info && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {/* Procesador (SoC) y Clústeres estilo CPU-Z */}
+
             <div className="sm:col-span-2 bg-[#131c2e] border border-slate-800 rounded-xl p-4 space-y-2.5">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-cyan-400 text-[10px] font-semibold uppercase">
@@ -509,7 +508,6 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
                 </p>
               </div>
 
-              {/* Topología real de clústeres ARM (solo cuando el kernel la expone) */}
               {Array.isArray(info.cpuClusters) && info.cpuClusters.length > 0 && (
                 <div className="bg-[#0b0f19] border border-slate-800/90 rounded-xl p-2.5 space-y-1.5">
                   <span className="text-[9px] uppercase tracking-wider text-slate-500 font-semibold block">
@@ -544,7 +542,6 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
               </div>
             </div>
 
-            {/* Memoria RAM Real */}
             <div className="bg-[#131c2e] border border-slate-800 rounded-xl p-3.5">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-emerald-400 text-[10px] font-semibold uppercase">
@@ -565,7 +562,6 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
               {info.ramUsedPct != null && <UsageBar pct={info.ramUsedPct} />}
             </div>
 
-            {/* Almacenamiento Interno Real */}
             <div className="bg-[#131c2e] border border-slate-800 rounded-xl p-3.5">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-amber-400 text-[10px] font-semibold uppercase">
@@ -586,7 +582,6 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
               {info.storageUsedPct != null && <UsageBar pct={info.storageUsedPct} color="from-amber-500 to-emerald-400" />}
             </div>
 
-            {/* Batería Detallada, Estado de Salud, Voltaje y Corriente */}
             <div className="sm:col-span-2 bg-[#131c2e] border border-slate-800 rounded-xl p-4 space-y-2.5">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-yellow-400 text-[10px] font-semibold uppercase">
@@ -627,7 +622,6 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
                 )}
               </div>
 
-              {/* Barra de carga visual */}
               {info.batteryPct != null && (
                 <div className="w-full h-2 bg-slate-900 rounded-full overflow-hidden">
                   <div
@@ -670,7 +664,6 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
               </div>
             </div>
 
-            {/* Acciones rápidas: Gemelo Digital 3D, Diagnóstico y Enfriamiento/Mantenimiento */}
             <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
               <button
                 onClick={() => onOpenPhone3D?.({ deviceInfo: info })}
@@ -692,7 +685,6 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
               </button>
             </div>
 
-            {/* Red & Sistema */}
             <div className="sm:col-span-2 bg-[#131c2e] border border-slate-800 rounded-xl p-3.5">
               <div className="flex items-center gap-2 text-violet-400 text-[10px] font-semibold uppercase">
                 <Wifi className="w-3.5 h-3.5" /> Red &amp; Seguridad SO
@@ -705,7 +697,6 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
               </p>
             </div>
 
-            {/* GPU WebGL */}
             <div className="sm:col-span-2 bg-[#131c2e] border border-slate-800 rounded-xl p-3.5">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-blue-400 text-[10px] font-semibold uppercase">
@@ -722,7 +713,6 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
           </div>
         )}
 
-        {/* Verificación de Modelo Comercial y Autenticidad con IA */}
         {info && (
           <div className="bg-[#131c2e] border border-cyan-500/25 rounded-2xl p-4 space-y-3">
             <div className="flex items-center justify-between gap-2">
@@ -826,7 +816,6 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
           </div>
         )}
 
-        {/* Micro-Stress CPU Mobile Benchmark */}
         <div className="bg-[#131c2e] border border-slate-800 rounded-2xl p-4 space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">

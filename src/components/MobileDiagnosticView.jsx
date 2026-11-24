@@ -1,3 +1,7 @@
+/**
+ * MobileDiagnosticView.jsx — Sistema experto de diagnóstico móvil (6 ramas, buscador de síntomas y tickets 3D).
+ */
+
 import React, { useMemo, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import {
@@ -6,9 +10,6 @@ import {
   Box, CloudUpload, RotateCcw, Sparkles,
 } from 'lucide-react';
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   Árbol de Diagnóstico Experto Android (6 Ramas · 18 Casos con Soluciones)
-   ═══════════════════════════════════════════════════════════════════════════ */
 const DIAGNOSTIC_TREE = [
   {
     id: 'bateria',
@@ -333,7 +334,6 @@ export default function MobileDiagnosticView({ deviceInfo, user, onOpenPhone3D }
   const [savedTicketId, setSavedTicketId] = useState(null);
   const [saveError, setSaveError] = useState('');
 
-  // Alertas automáticas detectadas desde la telemetría real del teléfono
   const autoAlerts = useMemo(() => {
     if (!deviceInfo) return [];
     const alerts = [];
@@ -515,7 +515,7 @@ export default function MobileDiagnosticView({ deviceInfo, user, onOpenPhone3D }
   return (
     <div className="h-full w-full overflow-y-auto bg-[#0b0f19] text-zinc-100 p-4 pb-24">
       <div className="max-w-2xl mx-auto space-y-3.5">
-        {/* Header */}
+
         <div className="bg-[#131c2e] border border-slate-800 rounded-2xl p-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center shrink-0">
@@ -544,7 +544,6 @@ export default function MobileDiagnosticView({ deviceInfo, user, onOpenPhone3D }
           )}
         </div>
 
-        {/* Alertas detectadas en tiempo real desde la telemetría del teléfono */}
         {!selectedCase && autoAlerts.length > 0 && (
           <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-3.5 space-y-2">
             <div className="flex items-center gap-2 text-amber-300 text-xs font-semibold">
@@ -568,7 +567,6 @@ export default function MobileDiagnosticView({ deviceInfo, user, onOpenPhone3D }
           </div>
         )}
 
-        {/* VISTA 1: Selección de rama + Buscador de síntomas */}
         {!activeBranch && !selectedCase && (
           <>
             <div className="relative">
@@ -635,7 +633,6 @@ export default function MobileDiagnosticView({ deviceInfo, user, onOpenPhone3D }
           </>
         )}
 
-        {/* VISTA 2: Pregunta guiada de la rama seleccionada */}
         {activeBranch && !selectedCase && (
           <div className="bg-[#131c2e] border border-slate-800 rounded-2xl p-4 space-y-3">
             <button
@@ -687,7 +684,6 @@ export default function MobileDiagnosticView({ deviceInfo, user, onOpenPhone3D }
           </div>
         )}
 
-        {/* VISTA 3: Dictamen Técnico + Soluciones Paso a Paso + Ticket 3D */}
         {activeBranch && selectedCase && (
           <div className="bg-[#131c2e] border border-emerald-500/30 rounded-2xl p-4 space-y-4">
             <div className="flex items-center justify-between">

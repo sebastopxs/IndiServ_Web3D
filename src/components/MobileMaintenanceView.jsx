@@ -1,3 +1,7 @@
+/**
+ * MobileMaintenanceView.jsx — Módulo de monitoreo térmico en vivo y mantenimiento real Android (Nivel 1 y Nivel 2).
+ */
+
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { recordMobileEvent } from '../utils/cloudHistory';
@@ -35,7 +39,6 @@ export default function MobileMaintenanceView({ deviceInfo, user }) {
     }
   }, []);
 
-  // Bloque A — Monitor Térmico en Tiempo Real (Nivel 1)
   const [thermal, setThermal] = useState(null);
   const [coolingActive, setCoolingActive] = useState(false);
   const [coolingSecondsLeft, setCoolingSecondsLeft] = useState(60);
@@ -44,14 +47,12 @@ export default function MobileMaintenanceView({ deviceInfo, user }) {
   const coolingTimerRef = useRef(null);
   const latestTempRef = useRef(null);
 
-  // Bloque B — Caché interna + Permisos Nivel 2 + Top Apps
   const [perms, setPerms] = useState({ hasUsageStats: false, hasAllFilesAccess: false });
   const [cacheClearing, setCacheClearing] = useState(false);
   const [cacheMessage, setCacheMessage] = useState('');
   const [topApps, setTopApps] = useState([]);
   const [loadingApps, setLoadingApps] = useState(false);
 
-  // Bloque C — Escáner de Descargas / APKs / Archivos Grandes (Nivel 2)
   const [minLargeMb, setMinLargeMb] = useState(100);
   const [scanningFiles, setScanningFiles] = useState(false);
   const [scanResult, setScanResult] = useState(null);
@@ -67,7 +68,6 @@ export default function MobileMaintenanceView({ deviceInfo, user }) {
     setTimeout(() => setActionToast((cur) => (cur === msg ? '' : cur)), 4500);
   };
 
-  // Lectura real de sensores térmicos / RAM (cada 2 s mientras esta vista esté montada)
   const fetchThermal = useCallback(async () => {
     if (!isNative) {
       setThermal({
@@ -149,7 +149,6 @@ export default function MobileMaintenanceView({ deviceInfo, user }) {
     };
   }, [fetchThermal, refreshPermissionsAndApps]);
 
-  // ── Bloque A: Sesión de Enfriamiento Guiado (60 s reales) ──
   const stopCoolingSession = () => {
     if (coolingTimerRef.current) {
       clearInterval(coolingTimerRef.current);
@@ -211,7 +210,6 @@ export default function MobileMaintenanceView({ deviceInfo, user }) {
     }, 1000);
   };
 
-  // ── Bloque A/B: Acciones nativas de Nivel 1 ──
   const handleClearInternalCache = async () => {
     if (!isNative || cacheClearing) return;
     setCacheClearing(true);
@@ -273,7 +271,6 @@ export default function MobileMaintenanceView({ deviceInfo, user }) {
     }
   };
 
-  // ── Bloque C: Escáner y borrado selectivo Nivel 2 ──
   const handleScanFiles = async () => {
     if (!isNative || scanningFiles) return;
     setScanningFiles(true);
@@ -359,7 +356,6 @@ export default function MobileMaintenanceView({ deviceInfo, user }) {
         if (tid) flashNotice(`Limpieza registrada en tu historial privado: ${tid}`);
       }
 
-      // Re-escanear para reflejar estado real del sistema
       await handleScanFiles();
     } catch {
       setDeleteFeedback('No se pudieron eliminar los archivos seleccionados.');
@@ -378,7 +374,7 @@ export default function MobileMaintenanceView({ deviceInfo, user }) {
   return (
     <div className="h-full w-full overflow-y-auto bg-[#0b0f19] text-zinc-100 p-4 pb-24">
       <div className="max-w-2xl mx-auto space-y-4">
-        {/* Header */}
+
         <div className="bg-[#131c2e] border border-slate-800 rounded-2xl p-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-10 h-10 rounded-xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center shrink-0">
@@ -408,7 +404,6 @@ export default function MobileMaintenanceView({ deviceInfo, user }) {
           </button>
         </div>
 
-        {/* Aviso elegante cuando se abre en navegador web (Vercel) */}
         {!isNative && (
           <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-3.5 text-xs text-amber-200 flex items-start gap-2.5">
             <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
@@ -427,9 +422,6 @@ export default function MobileMaintenanceView({ deviceInfo, user }) {
           </div>
         )}
 
-        {/* ═══════════════════════════════════════════════════════════════════
-            BLOQUE A — MONITOR TÉRMICO Y ENFRIAMIENTO HONESTO (NIVEL 1)
-           ═══════════════════════════════════════════════════════════════════ */}
         <div className="bg-[#131c2e] border border-slate-800 rounded-2xl p-4 space-y-3.5">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
@@ -478,7 +470,6 @@ export default function MobileMaintenanceView({ deviceInfo, user }) {
             </div>
           </div>
 
-          {/* Recomendaciones verificables basadas en telemetría real */}
           <div className="bg-[#0b0f19] border border-slate-800/90 rounded-xl p-3 space-y-1.5 text-[11px] text-slate-300">
             <p className="font-semibold text-cyan-300 flex items-center gap-1.5">
               <Flame className="w-3.5 h-3.5" /> Acciones reales para disipar calor
@@ -494,7 +485,6 @@ export default function MobileMaintenanceView({ deviceInfo, user }) {
             </ul>
           </div>
 
-          {/* Sesión de Enfriamiento Guiado (60 s) */}
           {!coolingActive ? (
             <button
               onClick={startCoolingSession}
@@ -542,7 +532,6 @@ export default function MobileMaintenanceView({ deviceInfo, user }) {
             </div>
           )}
 
-          {/* Accesos directos oficiales de Android (Nivel 1) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <button
               onClick={handleOpenBatterySettings}
@@ -561,9 +550,6 @@ export default function MobileMaintenanceView({ deviceInfo, user }) {
           </div>
         </div>
 
-        {/* ═══════════════════════════════════════════════════════════════════
-            BLOQUE B — CACHÉ INTERNA & USO DE APPS (NIVEL 1 + NIVEL 2)
-           ═══════════════════════════════════════════════════════════════════ */}
         <div className="bg-[#131c2e] border border-slate-800 rounded-2xl p-4 space-y-3.5">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
@@ -592,7 +578,6 @@ export default function MobileMaintenanceView({ deviceInfo, user }) {
             </p>
           )}
 
-          {/* Nivel 2: PACKAGE_USAGE_STATS */}
           <div className="border-t border-slate-800 pt-3 space-y-2.5">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
@@ -664,9 +649,6 @@ export default function MobileMaintenanceView({ deviceInfo, user }) {
           </div>
         </div>
 
-        {/* ═══════════════════════════════════════════════════════════════════
-            BLOQUE C — ESCÁNER DE DESCARGAS, APKS Y ARCHIVOS GRANDES (NIVEL 2)
-           ═══════════════════════════════════════════════════════════════════ */}
         <div className="bg-[#131c2e] border border-slate-800 rounded-2xl p-4 space-y-3.5">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
@@ -823,7 +805,6 @@ export default function MobileMaintenanceView({ deviceInfo, user }) {
         </div>
       </div>
 
-      {/* Modal de Confirmación Obligatoria antes de Eliminar Archivos */}
       {showConfirmDelete && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-sm bg-[#131c2e] border border-rose-500/35 rounded-2xl p-5 space-y-4 shadow-2xl">

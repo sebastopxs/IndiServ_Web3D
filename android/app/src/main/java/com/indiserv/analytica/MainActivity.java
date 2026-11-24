@@ -1,5 +1,8 @@
 package com.indiserv.analytica;
 
+/**
+ * MainActivity — Actividad principal de Capacitor con registro de plugins nativos y manejo de retroceso Android.
+ */
 import android.os.Bundle;
 import android.webkit.WebView;
 

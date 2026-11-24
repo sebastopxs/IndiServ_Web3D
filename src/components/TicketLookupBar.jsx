@@ -1,3 +1,7 @@
+/**
+ * TicketLookupBar.jsx — Buscador de tickets por ID exacto e historial privado filtrado por titular (owner_dni).
+ */
+
 import React, { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../supabaseClient';
 import {

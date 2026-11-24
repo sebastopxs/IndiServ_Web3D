@@ -1,10 +1,14 @@
+/**
+ * MobileAuthView.jsx — Pantalla de inicio de sesión y registro validado contra padrón UNMSM en Supabase.
+ */
+
 import React, { useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { POLITICA_PRIVACIDAD_TEXTO, VERSION_POLITICA } from '../utils/legalPolicy';
 import { ShieldCheck, LogIn, UserPlus, Eye, EyeOff, FileText, X, CheckCircle2, AlertCircle } from 'lucide-react';
 
 export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
-  const [mode, setMode] = useState('login'); // 'login' | 'register'
+  const [mode, setMode] = useState('login');
   const [dni, setDni] = useState('');
   const [nick, setNick] = useState('');
   const [correo, setCorreo] = useState('');
@@ -77,7 +81,7 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
 
     setLoading(true);
     try {
-      // 1. Verificar padrón oficial público UNMSM
+
       const { data: padron, error: errPadron } = await supabase
         .from('padron_oficial')
         .select('dni, nombres_completos, carrera')
@@ -90,7 +94,6 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
         return;
       }
 
-      // 2. Verificar si ya existe cuenta
       const { data: existing, error: errEx } = await supabase
         .from('usuarios_app')
         .select('dni')
@@ -103,7 +106,6 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
         return;
       }
 
-      // 3. Insertar cuenta
       const { error: errIns } = await supabase.from('usuarios_app').insert({
         dni: cleanDni,
         correo: cleanCorreo,
@@ -126,7 +128,7 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
   return (
     <div className="min-h-screen w-full bg-[#0b0f19] text-zinc-100 flex flex-col items-center justify-center p-4 overflow-y-auto">
       <div className="w-full max-w-md bg-[#131c2e] border border-slate-700/60 rounded-2xl shadow-2xl overflow-hidden">
-        {/* Header */}
+
         <div className="bg-[#0f172a] p-5 border-b border-slate-800">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
@@ -151,7 +153,6 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
           </p>
         </div>
 
-        {/* Form */}
         <form onSubmit={mode === 'login' ? handleLogin : handleRegister} className="p-5 space-y-3.5">
           <div>
             <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
@@ -217,7 +218,6 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
             </div>
           </div>
 
-          {/* Casilla obligatoria SOLO en Registro */}
           {mode === 'register' && (
             <div className="flex items-start justify-between gap-2 pt-1 bg-slate-900/60 p-3 rounded-xl border border-slate-800">
               <label className="flex items-start gap-2.5 text-xs text-slate-300 cursor-pointer select-none">
@@ -290,7 +290,6 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
         </form>
       </div>
 
-      {/* Modal de Política de Privacidad */}
       {showPolicyModal && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-lg max-h-[85vh] bg-[#131c2e] border border-slate-700 rounded-2xl flex flex-col overflow-hidden shadow-2xl">

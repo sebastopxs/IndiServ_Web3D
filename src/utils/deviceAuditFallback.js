@@ -6,7 +6,7 @@
  */
 
 const MODEL_CATALOG = {
-  // Samsung Galaxy S / Z / A / M populares
+
   'SM-S938': { name: 'Samsung Galaxy S25 Ultra', year: '2025' },
   'SM-S936': { name: 'Samsung Galaxy S25+', year: '2025' },
   'SM-S931': { name: 'Samsung Galaxy S25', year: '2025' },
@@ -30,7 +30,7 @@ const MODEL_CATALOG = {
   'SM-A256': { name: 'Samsung Galaxy A25 5G', year: '2023' },
   'SM-A155': { name: 'Samsung Galaxy A15', year: '2023' },
   'SM-A156': { name: 'Samsung Galaxy A15 5G', year: '2023' },
-  // Xiaomi / Redmi / POCO
+
   '25010PN30': { name: 'Xiaomi 15 Ultra', year: '2025' },
   '24129PN74': { name: 'Xiaomi 15', year: '2025' },
   '24090RA29': { name: 'Redmi Note 14 Pro 5G', year: '2024' },
@@ -46,7 +46,7 @@ const MODEL_CATALOG = {
   '2412DPC0A': { name: 'POCO X7 Pro 5G', year: '2025' },
   '24069PC21': { name: 'POCO F6', year: '2024' },
   '23113RKC6': { name: 'POCO F6 Pro', year: '2024' },
-  // Google Pixel
+
   'Pixel 9 Pro': { name: 'Google Pixel 9 Pro', year: '2024' },
   'Pixel 9': { name: 'Google Pixel 9', year: '2024' },
   'Pixel 8 Pro': { name: 'Google Pixel 8 Pro', year: '2023' },
@@ -75,7 +75,6 @@ export function runLocalDeviceAudit(info) {
     (info.buildTags || '').toLowerCase().includes('test-keys');
   const isEmulator = Boolean(info.isEmulator);
 
-  // Detección simple de clon obvio (ej. dice Ultra/Pro pero tiene <= 2 GB RAM)
   const claimsFlagship = /ultra|s25|s24|s23|iphone|pro max/i.test(`${catalogMatch.name} ${info.model || ''}`);
   const suspiciousSpecs = claimsFlagship && info.ramTotalGb != null && info.ramTotalGb <= 3;
 

@@ -1,7 +1,7 @@
-// Supabase Edge Function: analizar-dispositivo-ia
-// Despliegue:
-//   supabase secrets set GEMINI_API_KEY="TU_CLAVE_GEMINI"
-//   supabase functions deploy analizar-dispositivo-ia
+/**
+ * Supabase Edge Function: analizar-dispositivo-ia
+ * Identifica el modelo comercial y audita coherencia de hardware Android mediante Gemini API con respaldo heurístico.
+ */
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 

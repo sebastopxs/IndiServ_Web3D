@@ -6,9 +6,8 @@
 
 const CACHE_KEY = 'indiserv_hw_identity_cache_v1';
 
-// Catálogo comercial de teléfonos y tablets (coincidencia exacta o por prefijo)
 const DEVICE_MODEL_CATALOG = {
-  // Samsung Galaxy S / Z
+
   'SM-S938': { name: 'Samsung Galaxy S25 Ultra', tablet: false },
   'SM-S936': { name: 'Samsung Galaxy S25+', tablet: false },
   'SM-S931': { name: 'Samsung Galaxy S25', tablet: false },
@@ -31,7 +30,6 @@ const DEVICE_MODEL_CATALOG = {
   'SM-F741': { name: 'Samsung Galaxy Z Flip6', tablet: false },
   'SM-F731': { name: 'Samsung Galaxy Z Flip5', tablet: false },
 
-  // Samsung Galaxy A / M
   'SM-A566': { name: 'Samsung Galaxy A56 5G', tablet: false },
   'SM-A556': { name: 'Samsung Galaxy A55 5G', tablet: false },
   'SM-A546': { name: 'Samsung Galaxy A54 5G', tablet: false },
@@ -54,7 +52,6 @@ const DEVICE_MODEL_CATALOG = {
   'SM-M546': { name: 'Samsung Galaxy M54 5G', tablet: false },
   'SM-M346': { name: 'Samsung Galaxy M34 5G', tablet: false },
 
-  // Samsung Galaxy Tab (Tablets)
   'SM-X920': { name: 'Samsung Galaxy Tab S10 Ultra', tablet: true },
   'SM-X820': { name: 'Samsung Galaxy Tab S10+', tablet: true },
   'SM-X910': { name: 'Samsung Galaxy Tab S9 Ultra', tablet: true },
@@ -74,7 +71,6 @@ const DEVICE_MODEL_CATALOG = {
   'SM-T220': { name: 'Samsung Galaxy Tab A7 Lite', tablet: true },
   'SM-T225': { name: 'Samsung Galaxy Tab A7 Lite LTE', tablet: true },
 
-  // Xiaomi / Redmi / POCO / Pad
   '25010PN30': { name: 'Xiaomi 15 Ultra', tablet: false },
   '24129PN74': { name: 'Xiaomi 15', tablet: false },
   '24030PN60': { name: 'Xiaomi 14 Ultra', tablet: false },
@@ -101,7 +97,6 @@ const DEVICE_MODEL_CATALOG = {
   '2405CRPFD': { name: 'Redmi Pad Pro', tablet: true },
   '22081283':  { name: 'Redmi Pad', tablet: true },
 
-  // Google Pixel
   'Pixel 9 Pro XL': { name: 'Google Pixel 9 Pro XL', tablet: false },
   'Pixel 9 Pro':    { name: 'Google Pixel 9 Pro', tablet: false },
   'Pixel 9':        { name: 'Google Pixel 9', tablet: false },
@@ -113,7 +108,6 @@ const DEVICE_MODEL_CATALOG = {
   'Pixel 7':        { name: 'Google Pixel 7', tablet: false },
   'Pixel Tablet':   { name: 'Google Pixel Tablet', tablet: true },
 
-  // Motorola / Lenovo Tab
   'XT2409': { name: 'Motorola Edge 50 Neo', tablet: false },
   'XT2403': { name: 'Motorola Edge 50 Pro', tablet: false },
   'XT2429': { name: 'Motorola Edge 50 Fusion', tablet: false },
@@ -127,7 +121,6 @@ const DEVICE_MODEL_CATALOG = {
   'TB350':  { name: 'Lenovo Tab P11 (2nd Gen)', tablet: true },
   'TB370':  { name: 'Lenovo Tab P12', tablet: true },
 
-  // HONOR / OnePlus / OPPO / Realme
   'REA-NX9':  { name: 'HONOR 90', tablet: false },
   'ELI-NX9':  { name: 'HONOR 200', tablet: false },
   'ALI-NX1':  { name: 'HONOR Magic6 Lite', tablet: false },
@@ -138,9 +131,8 @@ const DEVICE_MODEL_CATALOG = {
   'RMX3851':  { name: 'Realme GT 6', tablet: false },
 };
 
-// Catálogo de procesadores SoC estilo CPU-Z (código de fábrica / plataforma -> nombre comercial)
 const SOC_CATALOG = [
-  // Qualcomm Snapdragon (Flagship / 8-series)
+
   { match: /\b(sm8750|sun)\b/i,               name: 'Qualcomm Snapdragon 8 Elite',      vendor: 'Qualcomm' },
   { match: /\b(sm8650|pineapple)\b/i,         name: 'Qualcomm Snapdragon 8 Gen 3',      vendor: 'Qualcomm' },
   { match: /\b(sm8635|cliffs)\b/i,            name: 'Qualcomm Snapdragon 8s Gen 3',     vendor: 'Qualcomm' },
@@ -151,7 +143,6 @@ const SOC_CATALOG = [
   { match: /\b(sm8250|kona)\b/i,              name: 'Qualcomm Snapdragon 865 / 870',    vendor: 'Qualcomm' },
   { match: /\b(sm8150|msmnile)\b/i,           name: 'Qualcomm Snapdragon 855',          vendor: 'Qualcomm' },
 
-  // Qualcomm Snapdragon (7 / 6 / 4 series)
   { match: /\b(sm7675)\b/i,                   name: 'Qualcomm Snapdragon 7+ Gen 3',     vendor: 'Qualcomm' },
   { match: /\b(sm7550|crow)\b/i,              name: 'Qualcomm Snapdragon 7 Gen 3',      vendor: 'Qualcomm' },
   { match: /\b(sm7475)\b/i,                   name: 'Qualcomm Snapdragon 7+ Gen 2',     vendor: 'Qualcomm' },
@@ -168,7 +159,6 @@ const SOC_CATALOG = [
   { match: /\b(sm4375)\b/i,                   name: 'Qualcomm Snapdragon 4 Gen 1',      vendor: 'Qualcomm' },
   { match: /\b(sm4350)\b/i,                   name: 'Qualcomm Snapdragon 480 5G',       vendor: 'Qualcomm' },
 
-  // MediaTek Dimensity
   { match: /\b(mt6991)\b/i,                   name: 'MediaTek Dimensity 9400',          vendor: 'MediaTek' },
   { match: /\b(mt6989)\b/i,                   name: 'MediaTek Dimensity 9300',          vendor: 'MediaTek' },
   { match: /\b(mt6985)\b/i,                   name: 'MediaTek Dimensity 9200',          vendor: 'MediaTek' },
@@ -183,7 +173,6 @@ const SOC_CATALOG = [
   { match: /\b(mt6835)\b/i,                   name: 'MediaTek Dimensity 6100+ / 6300',  vendor: 'MediaTek' },
   { match: /\b(mt6833)\b/i,                   name: 'MediaTek Dimensity 6020 / 700',    vendor: 'MediaTek' },
 
-  // MediaTek Helio (con desambiguación adicional por GPU/MHz abajo)
   { match: /\b(mt6789|mt8781)\b/i,            name: 'MediaTek Helio G99 / G100',        vendor: 'MediaTek' },
   { match: /\b(mt6785)\b/i,                   name: 'MediaTek Helio G90T / G95',        vendor: 'MediaTek' },
   { match: /\b(mt6781)\b/i,                   name: 'MediaTek Helio G96',               vendor: 'MediaTek' },
@@ -192,7 +181,6 @@ const SOC_CATALOG = [
   { match: /\b(mt6765)\b/i,                   name: 'MediaTek Helio G35 / G37 / P35',   vendor: 'MediaTek' },
   { match: /\b(mt6762)\b/i,                   name: 'MediaTek Helio P22 / G25',         vendor: 'MediaTek' },
 
-  // Samsung Exynos
   { match: /\b(s5e9945|exynos\s*2400)\b/i,    name: 'Samsung Exynos 2400',              vendor: 'Samsung' },
   { match: /\b(s5e9925|exynos\s*2200)\b/i,    name: 'Samsung Exynos 2200',              vendor: 'Samsung' },
   { match: /\b(exynos\s*2100|s5e9840)\b/i,    name: 'Samsung Exynos 2100',              vendor: 'Samsung' },
@@ -203,19 +191,16 @@ const SOC_CATALOG = [
   { match: /\b(exynos\s*9611|universal9611)\b/i, name: 'Samsung Exynos 9611',           vendor: 'Samsung' },
   { match: /\b(exynos\s*850|s5e3830)\b/i,     name: 'Samsung Exynos 850',               vendor: 'Samsung' },
 
-  // Google Tensor
   { match: /\b(zumapro|tensor\s*g4)\b/i,      name: 'Google Tensor G4',                 vendor: 'Google' },
   { match: /\b(zuma|tensor\s*g3)\b/i,         name: 'Google Tensor G3',                 vendor: 'Google' },
   { match: /\b(gs201|cloudripper|tensor\s*g2)\b/i, name: 'Google Tensor G2',            vendor: 'Google' },
   { match: /\b(gs101|whitechapel|tensor)\b/i, name: 'Google Tensor',                    vendor: 'Google' },
 
-  // UNISOC / Tiger
   { match: /\b(ums9620|t760)\b/i,             name: 'UNISOC Tiger T760',                vendor: 'UNISOC' },
   { match: /\b(ums9230|t606)\b/i,             name: 'UNISOC Tiger T606 / T616',         vendor: 'UNISOC' },
   { match: /\b(ums512|t618|t610)\b/i,         name: 'UNISOC Tiger T610 / T618',         vendor: 'UNISOC' },
   { match: /\b(sc9863a)\b/i,                  name: 'UNISOC SC9863A',                   vendor: 'UNISOC' },
 
-  // HiSilicon Kirin
   { match: /\b(kirin\s*9000|hi36a0)\b/i,      name: 'HiSilicon Kirin 9000',             vendor: 'HiSilicon' },
   { match: /\b(kirin\s*990|hi3690)\b/i,       name: 'HiSilicon Kirin 990',              vendor: 'HiSilicon' },
   { match: /\b(kirin\s*980|hi3680)\b/i,       name: 'HiSilicon Kirin 980',              vendor: 'HiSilicon' },
@@ -227,7 +212,7 @@ function looksLikeRawModelCode(str) {
   const s = str.trim();
   if (s.length < 3) return true;
   if (/^(unknown|android|generic|dispositivo|equipo móvil)$/i.test(s)) return true;
-  // Códigos de fábrica típicos: SM-S938B, 23053RN02L, XT2347-2, CPH2581, RMX3851, TB330FU
+
   if (/^(SM-[A-Z]\d{3,4}[A-Z0-9]*|\d{5,7}[A-Z0-9]{2,6}|XT\d{4}[A-Z0-9-]*|CPH\d{4}|RMX\d{4}|M\d{4}[A-Z0-9]+|TB\d{3}[A-Z0-9]*)$/i.test(s)) {
     return true;
   }
@@ -269,7 +254,7 @@ export function saveCachedAiIdentity(fingerprintKey, data) {
     };
     localStorage.setItem(CACHE_KEY, JSON.stringify(map));
   } catch {
-    // Ignore storage quota errors
+
   }
 }
 
@@ -297,17 +282,16 @@ export function resolveCommercialDeviceName(hw = {}) {
   let commercialName = '';
   let resolvedFromCatalog = false;
 
-  // 1. Priorizar marketName OEM válido (no código crudo)
   if (marketName && !looksLikeRawModelCode(marketName)) {
     commercialName = marketName;
     resolvedFromCatalog = true;
   }
-  // 2. Diccionario local exacto / prefijo
+
   else if (catalogHit) {
     commercialName = catalogHit.name;
     resolvedFromCatalog = true;
   }
-  // 3. Caché previo enriquecido por IA
+
   else {
     const cached = getCachedAiIdentity(buildDeviceFingerprint(hw));
     if (cached?.commercialName && !looksLikeRawModelCode(cached.commercialName)) {
@@ -316,13 +300,11 @@ export function resolveCommercialDeviceName(hw = {}) {
     }
   }
 
-  // 4. Settings.Global device_name si es descriptivo (ej. "Galaxy Tab S9")
   if (!commercialName && deviceNameSetting && !looksLikeRawModelCode(deviceNameSetting) && !/^my\s|^mi\s/i.test(deviceNameSetting)) {
     commercialName = deviceNameSetting;
     resolvedFromCatalog = true;
   }
 
-  // 5. Fallback limpio con marca + código
   if (!commercialName) {
     const brandPrefix = brand && brand.toLowerCase() !== manufacturer.toLowerCase()
       ? `${manufacturer} ${brand}`.trim()
@@ -356,7 +338,6 @@ export function resolveCommercialSocName(hw = {}) {
   const maxFreqMhz = Number(hw.cpuMaxFreqMhz) || 0;
   const factoryCode = (hw.socCodename || hw.socModel || hw.chipName || hw.hardwarePlatform || hw.hardwareCode || '').trim();
 
-  // Si ya contiene nombre comercial explícito (Snapdragon / Dimensity / Helio / Exynos / Tensor / Kirin)
   if (/\b(snapdragon|dimensity|helio|exynos\s*\d{3,4}|tensor\s*g?\d?|kirin\s*\d{3,4}|tiger\s*t\d{3})\b/i.test(candidates)) {
     const vendor = /snapdragon/i.test(candidates)
       ? 'Qualcomm'
@@ -378,12 +359,10 @@ export function resolveCommercialSocName(hw = {}) {
     };
   }
 
-  // Buscar coincidencia en el catálogo estilo CPU-Z
   for (const entry of SOC_CATALOG) {
     if (entry.match.test(candidates)) {
       let resolvedName = entry.name;
 
-      // Desambiguación fina MediaTek MT6768 / MT6769 por GPU + frecuencia
       if (/\bmt6768\b/i.test(candidates) && gpu.includes('mali-g52')) {
         resolvedName = maxFreqMhz >= 2000 ? 'MediaTek Helio G85 / G88' : 'MediaTek Helio G80';
       } else if (/\bsm6225\b/i.test(candidates) && maxFreqMhz >= 2700) {
@@ -401,7 +380,6 @@ export function resolveCommercialSocName(hw = {}) {
     }
   }
 
-  // Caché previo enriquecido por IA
   const cached = getCachedAiIdentity(buildDeviceFingerprint(hw));
   if (cached?.commercialSoc) {
     return {
@@ -412,7 +390,6 @@ export function resolveCommercialSocName(hw = {}) {
     };
   }
 
-  // Inferencia por GPU WebGL si el kernel ocultó /proc/cpuinfo y SOC_MODEL
   if (gpu.includes('adreno')) {
     const m = gpu.match(/adreno[^0-9]*(\d{3})/i);
     return {
