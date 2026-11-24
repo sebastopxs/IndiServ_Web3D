@@ -149,7 +149,13 @@ function formatSupabaseTelemetry(data) {
   };
 
   const scanDate = data.fecha_creacion
-    ? new Date(data.fecha_creacion).toLocaleDateString('es-ES', { year: 'numeric', month: '2-digit', day: '2-digit' })
+    ? new Date(data.fecha_creacion).toLocaleString('es-ES', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
     : new Date().toLocaleDateString();
 
   const baseSpecs = [data.cpu, data.ram, data.gpu, data.almacenamiento].filter(Boolean).join(' · ');
@@ -157,6 +163,7 @@ function formatSupabaseTelemetry(data) {
   return {
     id_ticket: data.id_ticket,
     ticket_id: data.id_ticket,
+    fecha_creacion: data.fecha_creacion || null,
     scan_date: scanDate,
     system_status: (data.health_score ?? 100) >= 80 ? 'Certificación Óptima' : 'Requiere Atención',
     base_specs: baseSpecs || 'Telemetría completa de hardware',
