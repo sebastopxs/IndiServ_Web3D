@@ -23,8 +23,40 @@ export const HONEY_TICKETS = new Set([
   '9999-TICKET-0000',
 ]);
 
+const AUTH_GUARD_STORAGE_KEY = '__indiserv_auth_guard_v1';
 let failedAttempts = [];
 let lockoutUntilMs = 0;
+
+function loadAuthGuardState() {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    const raw = localStorage.getItem(AUTH_GUARD_STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed?.attempts)) {
+      failedAttempts = parsed.attempts.filter((n) => typeof n === 'number');
+    }
+    if (typeof parsed?.lockoutUntilMs === 'number') {
+      lockoutUntilMs = parsed.lockoutUntilMs;
+    }
+  } catch {
+    // Fallback a memoria si localStorage está bloqueado
+  }
+}
+
+function saveAuthGuardState() {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(
+      AUTH_GUARD_STORAGE_KEY,
+      JSON.stringify({ attempts: failedAttempts, lockoutUntilMs })
+    );
+  } catch {
+    // Fallback silencioso
+  }
+}
+
+loadAuthGuardState();
 
 function randomHex(bytesLen = 4) {
   const arr = new Uint8Array(bytesLen);
@@ -67,6 +99,7 @@ export async function verifyPassword(dni, plainPassword, storedHash) {
 }
 
 export function checkLoginRateLimit() {
+  loadAuthGuardState();
   const now = Date.now();
   if (now < lockoutUntilMs) {
     return { allowed: false, waitSeconds: Math.max(1, Math.ceil((lockoutUntilMs - now) / 1000)) };
@@ -75,21 +108,25 @@ export function checkLoginRateLimit() {
 }
 
 export function recordFailedLogin(dni, correo) {
+  loadAuthGuardState();
   const now = Date.now();
   failedAttempts = failedAttempts.filter((t) => now - t < 300_000);
   failedAttempts.push(now);
   if (failedAttempts.length >= 5) {
     lockoutUntilMs = now + 60_000;
     failedAttempts = [];
+    saveAuthGuardState();
     triggerHoneytokenAlert('FUERZA_BRUTA_LOGIN', `5 intentos fallidos sobre DNI='${dni}' correo='${correo}'`);
     return { locked: true, waitSeconds: 60 };
   }
+  saveAuthGuardState();
   return { locked: false, waitSeconds: 0 };
 }
 
 export function resetLoginRateLimit() {
   failedAttempts = [];
   lockoutUntilMs = 0;
+  saveAuthGuardState();
 }
 
 export function isHoneyCredential(dni, correo = '') {

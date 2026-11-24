@@ -5,11 +5,55 @@
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+const ALLOWED_ORIGINS = new Set([
+  "https://indiserv-web3d.vercel.app",
+  "https://localhost",
+  "http://localhost",
+  "capacitor://localhost",
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "http://localhost:4173",
+]);
+
+const VERCEL_PREVIEW_REGEX = /^https:\/\/indiserv-web3d(-[a-z0-9-]+)?\.vercel\.app$/i;
+
+const RATE_WINDOW_MS = 60_000;
+const MAX_REQ_PER_WINDOW = 12;
+const ipHits = new Map<string, number[]>();
+
+function isOriginAllowed(origin: string | null): boolean {
+  if (!origin) return true; // Peticiones nativas sin cabecera Origin (Android/Desktop)
+  const clean = origin.trim();
+  return ALLOWED_ORIGINS.has(clean) || VERCEL_PREVIEW_REGEX.test(clean);
+}
+
+function getCorsHeaders(req: Request): Record<string, string> {
+  const origin = req.headers.get("origin");
+  const allowedOrigin =
+    origin && isOriginAllowed(origin) ? origin : "https://indiserv-web3d.vercel.app";
+  return {
+    "Access-Control-Allow-Origin": allowedOrigin,
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Vary": "Origin",
+  };
+}
+
+function checkEdgeRateLimit(req: Request): boolean {
+  const ip =
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    req.headers.get("cf-connecting-ip") ||
+    "anon";
+  const now = Date.now();
+  const prev = (ipHits.get(ip) || []).filter((t) => now - t < RATE_WINDOW_MS);
+  if (prev.length >= MAX_REQ_PER_WINDOW) {
+    ipHits.set(ip, prev);
+    return false;
+  }
+  prev.push(now);
+  ipHits.set(ip, prev);
+  return true;
+}
 
 interface TelemetryInput {
   manufacturer?: string;
@@ -84,8 +128,25 @@ function buildHeuristicFallback(t: TelemetryInput) {
 }
 
 Deno.serve(async (req: Request) => {
+  const corsHeaders = getCorsHeaders(req);
+  const origin = req.headers.get("origin");
+
+  if (!isOriginAllowed(origin)) {
+    return new Response(
+      JSON.stringify({ error: "Origen CORS no autorizado para invocar esta función." }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403 },
+    );
+  }
+
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: CORS_HEADERS });
+    return new Response("ok", { headers: corsHeaders });
+  }
+
+  if (!checkEdgeRateLimit(req)) {
+    return new Response(
+      JSON.stringify({ error: "Demasiadas solicitudes de análisis IA. Intente en 60 segundos." }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 429 },
+    );
   }
 
   try {
@@ -93,7 +154,7 @@ Deno.serve(async (req: Request) => {
     if (rawBodyText.length > 4096) {
       return new Response(
         JSON.stringify({ error: "Payload excede el límite de seguridad permitido (4 KB)." }),
-        { headers: { ...CORS_HEADERS, "Content-Type": "application/json" }, status: 413 },
+        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 413 },
       );
     }
     const body = rawBodyText ? JSON.parse(rawBodyText) : {};
@@ -112,7 +173,7 @@ Deno.serve(async (req: Request) => {
 
     if (!apiKey) {
       return new Response(JSON.stringify(buildHeuristicFallback(telemetry)), {
-        headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 200,
       });
     }
@@ -199,14 +260,14 @@ Responde EXCLUSIVAMENTE un objeto JSON válido con esta estructura exacta:
       const fb = buildHeuristicFallback(telemetry);
       return new Response(
         JSON.stringify({ ...fb, aviso_ia: `Gemini HTTP ${lastStatus}; se aplicó auditoría heurística.` }),
-        { headers: { ...CORS_HEADERS, "Content-Type": "application/json" }, status: 200 },
+        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 },
       );
     }
     const rawText = gData?.candidates?.[0]?.content?.parts?.[0]?.text || "";
     const parsed = JSON.parse(rawText);
 
     return new Response(JSON.stringify({ origen: "gemini-ia", ...parsed }), {
-      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
       status: 200,
     });
   } catch (err) {
@@ -214,7 +275,7 @@ Responde EXCLUSIVAMENTE un objeto JSON válido con esta estructura exacta:
       JSON.stringify({
         error: `Error en análisis IA: ${err instanceof Error ? err.message : String(err)}`,
       }),
-      { headers: { ...CORS_HEADERS, "Content-Type": "application/json" }, status: 500 },
+      { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 },
     );
   }
 });

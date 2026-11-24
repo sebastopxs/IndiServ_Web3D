@@ -60,9 +60,38 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
 
     setLoading(true);
     try {
+      const hashedInput = await hashPassword(cleanDni, cleanPass);
+
+      // 1. Intentar autenticación segura del lado del servidor (RPC SECURITY DEFINER)
+      const { data: rpcData, error: rpcErr } = await supabase.rpc('autenticar_usuario', {
+        p_dni: cleanDni,
+        p_correo: cleanCorreo,
+        p_password_hash: hashedInput,
+      });
+
+      if (!rpcErr && rpcData && typeof rpcData === 'object' && 'ok' in rpcData) {
+        if (rpcData.ok) {
+          resetLoginRateLimit();
+          onAuthenticated({
+            dni: cleanDni,
+            correo: rpcData.correo || cleanCorreo,
+            nickname: rpcData.nickname || 'Operador',
+          });
+          return;
+        }
+        const lock = recordFailedLogin(cleanDni, cleanCorreo);
+        if (lock.locked) {
+          setError(`⏳ Cuenta protegida contra fuerza bruta. Espere ${lock.waitSeconds} s.`);
+        } else {
+          setError('Credenciales incorrectas o cuenta inexistente.');
+        }
+        return;
+      }
+
+      // 2. Respaldo compatible mientras se aplica la migración SQL de RPC en Supabase
       const { data, error: dbErr } = await supabase
         .from('usuarios_app')
-        .select('*')
+        .select('dni, correo, nickname, password_hash')
         .eq('dni', cleanDni)
         .limit(1);
 
@@ -70,18 +99,10 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
       const user = data?.[0];
       const check = user
         ? await verifyPassword(cleanDni, cleanPass, user.password_hash)
-        : { valid: false, needsMigration: false };
+        : { valid: false };
 
       if (user && user.correo === cleanCorreo && check.valid) {
         resetLoginRateLimit();
-        if (check.needsMigration) {
-          const upgradedHash = await hashPassword(cleanDni, cleanPass);
-          supabase
-            .from('usuarios_app')
-            .update({ password_hash: upgradedHash })
-            .eq('dni', cleanDni)
-            .then(() => {});
-        }
         onAuthenticated({
           dni: cleanDni,
           correo: user.correo,
@@ -132,7 +153,28 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
 
     setLoading(true);
     try {
+      const hashedPass = await hashPassword(cleanDni, cleanPass);
 
+      // 1. Intentar registro atómico del lado del servidor (RPC SECURITY DEFINER)
+      const { data: rpcReg, error: rpcRegErr } = await supabase.rpc('registrar_usuario_seguro', {
+        p_dni: cleanDni,
+        p_nickname: cleanNick,
+        p_correo: cleanCorreo,
+        p_password_hash: hashedPass,
+      });
+
+      if (!rpcRegErr && rpcReg && typeof rpcReg === 'object' && 'ok' in rpcReg) {
+        if (!rpcReg.ok) {
+          setError(rpcReg.error || 'No se pudo completar el registro.');
+          return;
+        }
+        setSuccess('Cuenta registrada exitosamente. Ahora puede iniciar sesión.');
+        setMode('login');
+        setPassword('');
+        return;
+      }
+
+      // 2. Respaldo compatible mientras se aplica la migración SQL de RPC en Supabase
       const { data: padron, error: errPadron } = await supabase
         .from('padron_oficial')
         .select('dni, nombres_completos, carrera')
@@ -157,7 +199,6 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
         return;
       }
 
-      const hashedPass = await hashPassword(cleanDni, cleanPass);
       const { error: errIns } = await supabase.from('usuarios_app').insert({
         dni: cleanDni,
         correo: cleanCorreo,
