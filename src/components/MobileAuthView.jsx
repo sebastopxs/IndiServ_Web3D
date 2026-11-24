@@ -219,10 +219,10 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
   };
 
   return (
-    <div className="min-h-screen w-full bg-[#0b0f19] text-zinc-100 flex flex-col items-center justify-center p-4 overflow-y-auto">
-      <div className="w-full max-w-md bg-[#131c2e] border border-slate-700/60 rounded-2xl shadow-2xl overflow-hidden">
+    <div className="min-h-screen w-full bg-[#090c12] text-slate-100 flex flex-col items-center justify-center p-4 overflow-y-auto">
+      <div className="view-enter w-full max-w-md instrument-card rounded-2xl shadow-2xl overflow-hidden">
 
-        <div className="bg-[#0f172a] p-5 border-b border-slate-800">
+        <div className="bg-[#101521] p-5 border-b border-slate-800/80">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center">

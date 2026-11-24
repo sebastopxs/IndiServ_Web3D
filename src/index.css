@@ -1,5 +1,21 @@
 @import "tailwindcss";
 
+:root {
+  --surface-canvas: #090c12;
+  --surface-rail: #101521;
+  --surface-card: #141b2a;
+  --surface-elevated: #192235;
+  --border-hairline: rgba(148, 163, 184, 0.14);
+  --border-active: rgba(34, 211, 238, 0.42);
+  --accent-emerald: #10b981;
+  --accent-cyan: #22d3ee;
+
+  /* Custom UI motion curves (crisp, responsive ease-out) */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
 *,
 *::before,
 *::after {
@@ -10,15 +26,14 @@ html,
 body {
   margin: 0;
   padding: 0;
-  background-color: #09090b;
-  color: #fafafa;
+  background-color: var(--surface-canvas);
+  color: #f1f5f9;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   font-family:
-    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif,
-    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+    "Plus Jakarta Sans", "Inter", ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
 #root {
@@ -26,17 +41,108 @@ body {
   height: 100vh;
 }
 
-/* Subtle scrollbar for the sidebar */
+/* Tabular numerals for jitter-free live sensors (MHz, °C, %, RAM) */
+.font-mono,
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Tactile press feedback on all interactive buttons without transition: all */
+button:not(:disabled) {
+  transition:
+    transform 140ms var(--ease-out),
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    box-shadow 180ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:not(:disabled):active {
+  transform: scale(0.97);
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid rgba(34, 211, 238, 0.65);
+  outline-offset: 2px;
+}
+
+/* Obsidian Instrument surfaces with subtle top specular hairline */
+.instrument-panel {
+  background: rgba(16, 21, 33, 0.84);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border-hairline);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 12px 32px rgba(0, 0, 0, 0.42);
+}
+
+.instrument-card {
+  background: var(--surface-card);
+  border: 1px solid var(--border-hairline);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  transition: border-color 180ms ease, transform 180ms var(--ease-out);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .instrument-card:hover {
+    border-color: rgba(148, 163, 184, 0.28);
+  }
+}
+
+/* GPU-accelerated view entrance (never scale(0)) */
+@keyframes viewEnter {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.view-enter {
+  animation: viewEnter 220ms var(--ease-out) both;
+}
+
+/* Safe-area padding for Android/iOS bottom gesture bars */
+.safe-bottom {
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .view-enter {
+    animation: fadeOnly 150ms ease both;
+  }
+  button:not(:disabled):active {
+    transform: none;
+  }
+}
+
+@keyframes fadeOnly {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Subtle custom scrollbar */
 ::-webkit-scrollbar {
-  width: 4px;
+  width: 5px;
+  height: 5px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(148, 163, 184, 0.16);
   border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(148, 163, 184, 0.3);
 }

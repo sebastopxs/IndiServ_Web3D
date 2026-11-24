@@ -494,15 +494,15 @@ export default function App() {
     <div className="w-screen h-screen flex flex-col md:flex-row bg-zinc-950 font-sans text-zinc-100 overflow-hidden relative">
 
       {showAppNav && (
-        <aside className="hidden md:flex flex-col items-center justify-between w-[76px] shrink-0 bg-[#0f172a] border-r border-white/10 py-3 px-1.5 z-30">
+        <aside className="hidden md:flex flex-col items-center justify-between w-[80px] shrink-0 bg-[#101521] border-r border-slate-800/80 py-3.5 px-2 z-30 shadow-[inset_-1px_0_0_rgba(255,255,255,0.03)]">
           <div className="flex flex-col items-center gap-2 w-full">
-            <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center mb-1">
-              <div className="w-3 h-3 bg-emerald-400 rounded-[3px]" />
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/12 border border-emerald-500/30 flex items-center justify-center mb-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+              <div className="w-3 h-3 bg-emerald-400 rounded-[3px] shadow-[0_0_10px_rgba(16,185,129,0.65)]" />
             </div>
             {canGoBack && (
               <button
                 onClick={goBackTab}
-                className="w-full flex flex-col items-center gap-0.5 py-2 px-1 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-cyan-300 border border-cyan-500/25 transition-colors mb-1"
+                className="w-full flex flex-col items-center gap-0.5 py-2 px-1 rounded-xl bg-[#161f32] hover:bg-[#1e2a42] text-cyan-300 border border-cyan-500/25 mb-1"
                 title="Retroceder"
               >
                 <ArrowLeft className="w-4 h-4" />
@@ -531,7 +531,7 @@ export default function App() {
       )}
 
       {activeTab === 'scanner' ? (
-        <div className="flex-1 overflow-hidden flex flex-col">
+        <div key="tab-scanner" className="view-enter flex-1 overflow-hidden flex flex-col bg-[#090c12]">
           <MobileScannerView
             user={authUser}
             onDeviceScanned={setMobileDeviceInfo}
@@ -541,16 +541,16 @@ export default function App() {
           />
         </div>
       ) : activeTab === 'diagnostic' ? (
-        <div className="flex-1 overflow-hidden flex flex-col">
+        <div key="tab-diagnostic" className="view-enter flex-1 overflow-hidden flex flex-col bg-[#090c12]">
           {canGoBack && (
-            <div className="shrink-0 bg-[#0f172a] border-b border-white/10 px-3 py-2 flex items-center justify-between">
+            <div className="shrink-0 bg-[#101521]/95 backdrop-blur-md border-b border-slate-800/80 px-3.5 py-2.5 flex items-center justify-between">
               <button
                 onClick={goBackTab}
-                className="inline-flex items-center gap-1.5 text-xs font-semibold text-cyan-300 hover:text-white bg-slate-800/80 px-3 py-1.5 rounded-lg transition-colors"
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-cyan-300 hover:text-white bg-[#172033] border border-slate-700/70 px-3 py-1.5 rounded-lg"
               >
                 <ArrowLeft className="w-3.5 h-3.5" /> Atrás
               </button>
-              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Diagnóstico Experto</span>
+              <span className="text-[11px] font-semibold text-slate-300 tracking-wide">Diagnóstico Experto</span>
               <span className="w-12" />
             </div>
           )}
@@ -563,16 +563,16 @@ export default function App() {
           </div>
         </div>
       ) : activeTab === 'maintenance' ? (
-        <div className="flex-1 overflow-hidden flex flex-col">
+        <div key="tab-maintenance" className="view-enter flex-1 overflow-hidden flex flex-col bg-[#090c12]">
           {canGoBack && (
-            <div className="shrink-0 bg-[#0f172a] border-b border-white/10 px-3 py-2 flex items-center justify-between">
+            <div className="shrink-0 bg-[#101521]/95 backdrop-blur-md border-b border-slate-800/80 px-3.5 py-2.5 flex items-center justify-between">
               <button
                 onClick={goBackTab}
-                className="inline-flex items-center gap-1.5 text-xs font-semibold text-cyan-300 hover:text-white bg-slate-800/80 px-3 py-1.5 rounded-lg transition-colors"
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-cyan-300 hover:text-white bg-[#172033] border border-slate-700/70 px-3 py-1.5 rounded-lg"
               >
                 <ArrowLeft className="w-3.5 h-3.5" /> Atrás
               </button>
-              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Enfriamiento y Cuidado</span>
+              <span className="text-[11px] font-semibold text-slate-300 tracking-wide">Enfriamiento y Cuidado</span>
               <span className="w-12" />
             </div>
           )}
@@ -584,16 +584,16 @@ export default function App() {
           </div>
         </div>
       ) : activeTab === 'tickets' ? (
-        <div className="flex-1 overflow-hidden flex flex-col">
+        <div key="tab-tickets" className="view-enter flex-1 overflow-hidden flex flex-col bg-[#090c12]">
           {canGoBack && (
-            <div className="shrink-0 bg-[#0f172a] border-b border-white/10 px-3 py-2 flex items-center justify-between">
+            <div className="shrink-0 bg-[#101521]/95 backdrop-blur-md border-b border-slate-800/80 px-3.5 py-2.5 flex items-center justify-between">
               <button
                 onClick={goBackTab}
-                className="inline-flex items-center gap-1.5 text-xs font-semibold text-cyan-300 hover:text-white bg-slate-800/80 px-3 py-1.5 rounded-lg transition-colors"
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-cyan-300 hover:text-white bg-[#172033] border border-slate-700/70 px-3 py-1.5 rounded-lg"
               >
                 <ArrowLeft className="w-3.5 h-3.5" /> Atrás
               </button>
-              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Mis Tickets Privados</span>
+              <span className="text-[11px] font-semibold text-slate-300 tracking-wide">Mis Tickets Privados</span>
               <span className="w-12" />
             </div>
           )}
@@ -630,40 +630,40 @@ export default function App() {
 
             <div className="absolute top-0 left-0 right-0 pointer-events-none z-10 p-3 md:p-5 flex flex-wrap items-start justify-between gap-2">
 
-              <div className="pointer-events-auto flex items-center gap-2 bg-zinc-950/75 backdrop-blur-md border border-white/[0.06] rounded-xl px-3 md:px-4 py-2 md:py-3 shadow-lg">
+              <div className="pointer-events-auto instrument-panel flex items-center gap-2.5 rounded-2xl px-3.5 md:px-4 py-2.5">
                 {canGoBack && (
                   <button
                     onClick={goBackTab}
-                    className="flex items-center gap-1 text-[11px] font-semibold text-cyan-300 hover:text-white bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/25 px-2.5 py-1 rounded-lg transition-colors mr-1"
+                    className="flex items-center gap-1 text-[11px] font-semibold text-cyan-300 hover:text-white bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/25 px-2.5 py-1 rounded-lg mr-1"
                     title="Volver a la pantalla anterior"
                   >
                     <ArrowLeft className="w-3.5 h-3.5" /> Atrás
                   </button>
                 )}
-                <div className="w-6 h-6 md:w-7 md:h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center">
-                  <div className="w-2.5 h-2.5 bg-emerald-400 rounded-[3px]" />
+                <div className="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center">
+                  <div className="w-2.5 h-2.5 bg-emerald-400 rounded-[3px] shadow-[0_0_8px_rgba(16,185,129,0.7)]" />
                 </div>
                 <div>
-                  <h1 className="text-xs md:text-sm font-semibold text-white tracking-tight leading-none">
-                    IndiServ <span className="font-light text-zinc-400">Analytica</span>
+                  <h1 className="text-xs md:text-sm font-semibold text-slate-100 tracking-tight leading-none">
+                    IndiServ <span className="font-normal text-slate-400">Analytica</span>
                   </h1>
-                  <p className="text-[8px] md:text-[9px] text-zinc-500 tracking-wider uppercase mt-0.5">
-                    Gemelo Digital 3D &amp; Telemetría
+                  <p className="text-[9px] text-slate-400 tracking-wide mt-0.5">
+                    Gemelo Digital 3D · Telemetría
                   </p>
                 </div>
                 {isLive ? (
-                  <span className="hidden sm:flex ml-2 text-[10px] text-emerald-400 font-medium bg-emerald-500/10 border border-emerald-500/25 px-2 py-0.5 rounded items-center gap-1.5">
+                  <span className="hidden sm:flex ml-2 text-[10px] text-emerald-300 font-medium bg-emerald-500/12 border border-emerald-500/30 px-2.5 py-0.5 rounded-full items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                     En Línea
                   </span>
                 ) : (
-                  <span className="hidden sm:inline ml-2 text-[10px] text-amber-400/90 font-medium bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded">
-                    {statusMessage || '[Offline]'}
+                  <span className="hidden sm:inline ml-2 text-[10px] text-amber-300 font-medium bg-amber-500/12 border border-amber-500/25 px-2.5 py-0.5 rounded-full">
+                    {statusMessage || 'Offline'}
                   </span>
                 )}
               </div>
 
-              <div className="pointer-events-auto flex items-center gap-1.5 bg-zinc-950/75 backdrop-blur-md border border-white/[0.06] rounded-xl px-2 py-1.5 shadow-lg">
+              <div className="pointer-events-auto instrument-panel flex items-center gap-1.5 rounded-2xl px-2 py-1.5">
                 <ToolbarBtn
                   icon={
                     currentDeviceType === 'phone'
@@ -682,13 +682,13 @@ export default function App() {
                   active={currentDeviceType !== 'desktop'}
                   onClick={toggleDeviceType}
                 />
-                <div className="w-px h-5 bg-white/[0.06]" />
+                <div className="w-px h-5 bg-white/[0.08]" />
                 <ToolbarBtn icon={RotateCcw} label="Restablecer" onClick={resetView} />
-                <div className="w-px h-5 bg-white/[0.06]" />
+                <div className="w-px h-5 bg-white/[0.08]" />
                 <ToolbarBtn icon={explodedView ? Minimize2 : Maximize2} label={explodedView ? 'Colapsar' : 'Explosión'} active={explodedView} onClick={() => { setExplodedView((v) => !v); if (!explodedView && showCase) setShowCase(false); }} />
                 <ToolbarBtn icon={showCase ? EyeOff : Eye} label={showCase ? 'Sin Chasis' : 'Chasis'} onClick={() => setShowCase((v) => !v)} />
-                <div className="hidden sm:block w-px h-5 bg-white/[0.06]" />
-                <button onClick={() => window.print()} className="hidden sm:flex items-center gap-1.5 text-[11px] font-medium text-white bg-emerald-600/90 hover:bg-emerald-500 px-3 py-1.5 rounded-lg transition-colors">
+                <div className="hidden sm:block w-px h-5 bg-white/[0.08]" />
+                <button onClick={() => window.print()} className="hidden sm:flex items-center gap-1.5 text-[11px] font-semibold text-[#03160f] bg-emerald-500 hover:bg-emerald-400 px-3 py-1.5 rounded-xl shadow-[0_0_16px_rgba(16,185,129,0.28)]">
                   <FileDown className="w-3.5 h-3.5" /> Reporte
                 </button>
               </div>
@@ -704,8 +704,8 @@ export default function App() {
       )}
 
       {showAppNav && (
-        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-[#0f172a]/95 backdrop-blur-xl border-t border-white/10 px-1 py-2 flex items-center justify-around">
-          <MobileNavBtn icon={Smartphone} label="Android" active={activeTab === 'scanner'} onClick={() => navigateToTab('scanner')} />
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-[#101521]/95 backdrop-blur-xl border-t border-slate-800/90 px-1.5 pt-1.5 safe-bottom flex items-center justify-around shadow-[0_-8px_24px_rgba(0,0,0,0.45)]">
+          <MobileNavBtn icon={Smartphone} label="Equipo" active={activeTab === 'scanner'} onClick={() => navigateToTab('scanner')} />
           <MobileNavBtn icon={Stethoscope} label="Diagnóst." active={activeTab === 'diagnostic'} onClick={() => navigateToTab('diagnostic')} />
           <MobileNavBtn icon={Snowflake} label="Cuidado" active={activeTab === 'maintenance'} onClick={() => navigateToTab('maintenance')} />
           <MobileNavBtn icon={Search} label="Tickets" active={activeTab === 'tickets'} onClick={() => navigateToTab('tickets')} />
@@ -732,14 +732,15 @@ function TabletNavBtn({ icon: Icon, label, active, onClick }) {
   return (
     <button
       onClick={onClick}
-      className={`w-full flex flex-col items-center gap-1 py-2 px-1 rounded-xl transition-colors ${
+      className={`relative w-full min-h-[48px] flex flex-col items-center justify-center gap-1 py-2 px-1 rounded-xl ${
         active
-          ? 'text-emerald-400 bg-emerald-500/15 border border-emerald-500/30'
-          : 'text-slate-400 hover:text-white hover:bg-white/[0.04] border border-transparent'
+          ? 'text-emerald-300 bg-emerald-500/12 border border-emerald-500/35 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]'
+          : 'text-slate-400 hover:text-slate-100 hover:bg-white/[0.04] border border-transparent'
       }`}
     >
+      {active && <span className="absolute left-0 top-2.5 bottom-2.5 w-[3px] rounded-r-full bg-emerald-400" />}
       <Icon className="w-4 h-4" />
-      <span className="text-[9px] font-medium leading-tight">{label}</span>
+      <span className="text-[9px] font-semibold leading-tight">{label}</span>
     </button>
   );
 }
@@ -748,12 +749,13 @@ function MobileNavBtn({ icon: Icon, label, active, onClick }) {
   return (
     <button
       onClick={onClick}
-      className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg transition-colors ${
-        active ? 'text-emerald-400 bg-emerald-500/10' : 'text-slate-400 hover:text-white'
+      className={`relative min-w-[48px] min-h-[44px] flex flex-col items-center justify-center gap-0.5 px-2.5 py-1 rounded-xl ${
+        active ? 'text-emerald-300 bg-emerald-500/12' : 'text-slate-400 hover:text-slate-100'
       }`}
     >
+      {active && <span className="absolute top-0 left-3 right-3 h-[2px] rounded-full bg-emerald-400" />}
       <Icon className="w-4 h-4" />
-      <span className="text-[9px] font-medium leading-tight">{label}</span>
+      <span className="text-[9px] font-semibold leading-tight">{label}</span>
     </button>
   );
 }
@@ -762,8 +764,10 @@ function ToolbarBtn({ icon: Icon, label, active, onClick }) {
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-lg transition-colors ${
-        active ? 'text-emerald-300 bg-emerald-500/15' : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.04]'
+      className={`flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-xl ${
+        active
+          ? 'text-emerald-300 bg-emerald-500/15 border border-emerald-500/30'
+          : 'text-slate-300 hover:text-white hover:bg-white/[0.06] border border-transparent'
       }`}
     >
       <Icon className="w-3.5 h-3.5" />

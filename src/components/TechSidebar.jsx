@@ -27,11 +27,11 @@ export default function TechSidebar({ selectedComponent, ticketData, onCloseComp
 
   if (!ticketData) {
     return (
-      <aside className="w-full md:w-[380px] shrink-0 h-[44vh] md:h-full bg-zinc-950/90 backdrop-blur-xl border-t md:border-t-0 md:border-l border-white/[0.06] p-6">
+      <aside className="w-full md:w-[390px] shrink-0 h-[44vh] md:h-full bg-[#101521]/95 backdrop-blur-xl border-t md:border-t-0 md:border-l border-slate-800/80 p-6">
         <div className="animate-pulse space-y-6">
-          <div className="h-8 bg-white/5 rounded-lg w-2/3" />
-          <div className="h-28 bg-white/5 rounded-xl" />
-          <div className="h-40 bg-white/5 rounded-xl" />
+          <div className="h-8 bg-slate-800/70 rounded-lg w-2/3" />
+          <div className="h-28 bg-slate-800/50 rounded-xl" />
+          <div className="h-40 bg-slate-800/50 rounded-xl" />
         </div>
       </aside>
     );
@@ -76,20 +76,20 @@ export default function TechSidebar({ selectedComponent, ticketData, onCloseComp
   }
 
   return (
-    <aside className="w-full md:w-[390px] shrink-0 h-[46vh] md:h-full bg-zinc-950/90 backdrop-blur-xl border-t md:border-t-0 md:border-l border-white/[0.06] flex flex-col overflow-hidden relative z-10 select-none pb-14 md:pb-0">
+    <aside className="w-full md:w-[396px] shrink-0 h-[46vh] md:h-full bg-[#101521]/95 backdrop-blur-xl border-t md:border-t-0 md:border-l border-slate-800/80 flex flex-col overflow-hidden relative z-10 select-none pb-16 md:pb-0 shadow-[inset_1px_0_0_rgba(255,255,255,0.03)]">
 
-      <div className="flex-1 overflow-y-auto px-5 md:px-6 pt-5 md:pt-6 pb-10 space-y-6">
+      <div className="flex-1 overflow-y-auto px-5 md:px-6 pt-5 md:pt-6 pb-10 space-y-5">
 
-        <header className="pb-5 border-b border-white/[0.06]">
-          <div className="flex items-center justify-between">
-            <h2 className="text-[15px] font-semibold text-white tracking-tight truncate max-w-[240px]">
+        <header className="pb-4 border-b border-slate-800/80">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-[15px] font-semibold font-mono text-slate-100 tracking-tight truncate max-w-[230px]">
               {ticketData.id_ticket || ticketData.ticket_id || 'TICKET-ACTIVO'}
             </h2>
-            <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-emerald-400/80 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-full shrink-0">
+            <span className="text-[10px] font-medium tracking-wide text-emerald-300 bg-emerald-500/12 border border-emerald-500/25 px-2.5 py-0.5 rounded-full shrink-0">
               Registro Auditado
             </span>
           </div>
-          <p className="text-[11px] text-zinc-500 mt-1">
+          <p className="text-[11px] text-slate-400 mt-1">
             Auditoría de Hardware · {ticketData.scan_date || 'En tiempo real'}
           </p>
         </header>
@@ -98,19 +98,19 @@ export default function TechSidebar({ selectedComponent, ticketData, onCloseComp
 
           <>
 
-            <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-5">
+            <div className="instrument-card rounded-2xl p-5">
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-medium mb-1">Índice de Salud</p>
+                  <p className="text-[11px] text-slate-400 font-medium mb-1">Índice de Salud</p>
                   <div className="flex items-baseline gap-1.5">
-                    <span className="text-3xl font-bold tabular-nums text-white">{healthScore}</span>
-                    <span className="text-sm text-zinc-600 font-medium">/100</span>
+                    <span className="text-3xl font-bold font-mono tabular-nums text-white">{healthScore}</span>
+                    <span className="text-sm text-slate-500 font-medium">/100</span>
                   </div>
                 </div>
                 <span className={`inline-flex items-center gap-1.5 text-[10px] font-medium px-2.5 py-1 rounded-full border ${
                   isOptimal
-                    ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
-                    : 'text-amber-400 bg-amber-500/10 border-amber-500/20'
+                    ? 'text-emerald-300 bg-emerald-500/12 border-emerald-500/25'
+                    : 'text-amber-300 bg-amber-500/12 border-amber-500/25'
                 }`}>
                   {isOptimal ? <CheckCircle2 className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
                   {isOptimal ? 'Certificación Óptima' : 'Requiere Atención'}
@@ -118,9 +118,9 @@ export default function TechSidebar({ selectedComponent, ticketData, onCloseComp
               </div>
             </div>
 
-            <div className="space-y-3">
-              <h3 className="text-[10px] text-zinc-500 uppercase tracking-widest font-semibold">Configuración Base Detectada</h3>
-              <div className="bg-white/[0.02] border border-white/[0.05] rounded-xl p-4 space-y-3">
+            <div className="space-y-2.5">
+              <h3 className="text-[11px] text-slate-400 font-semibold">Configuración Base Detectada</h3>
+              <div className="instrument-card rounded-2xl p-4 space-y-3">
                 {ticketData.cpu && (
                   <div>
                     <span className="text-[9px] uppercase tracking-wider text-cyan-400/80 font-semibold block">Procesador (CPU)</span>
