@@ -6,6 +6,12 @@ import { supabase } from '../supabaseClient';
 import { runLocalDeviceAudit } from '../utils/deviceAuditFallback';
 import { recordMobileEvent } from '../utils/cloudHistory';
 import {
+  resolveCommercialDeviceName,
+  resolveCommercialSocName,
+  buildDeviceFingerprint,
+  saveCachedAiIdentity,
+} from '../utils/hardwareCatalog';
+import {
   Cpu, BatteryCharging, Wifi, Smartphone, MonitorPlay, Play, Square,
   Activity, RefreshCw, HardDrive, MemoryStick, ShieldCheck, Thermometer,
   Sparkles, CheckCircle2, AlertTriangle, ShieldAlert, Box, Zap, Stethoscope, Snowflake,
@@ -89,6 +95,7 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
   const workersRef = useRef([]);
   const timerRef = useRef(null);
   const lastScanRecordAtRef = useRef(0);
+  const aiEnrichedRef = useRef(false);
 
   const scanDevice = async () => {
     setScanning(true);
@@ -132,24 +139,61 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
       const manufacturer = nativeHw?.manufacturer || devInfo.manufacturer || 'Dispositivo';
       const brand = nativeHw?.brand || '';
       const model = nativeHw?.model || devInfo.model || 'Equipo Móvil';
-      const brandPrefix = brand && brand.toLowerCase() !== manufacturer.toLowerCase() ? `${manufacturer} ${brand}` : manufacturer;
 
       const ramTotalGb = nativeHw?.ramTotalMb ? +(nativeHw.ramTotalMb / 1024).toFixed(1) : (navigator.deviceMemory || null);
       const ramAvailGb = nativeHw?.ramAvailMb ? +(nativeHw.ramAvailMb / 1024).toFixed(1) : null;
       const ramUsedGb = ramTotalGb != null && ramAvailGb != null ? +(ramTotalGb - ramAvailGb).toFixed(1) : null;
 
-      const scannedData = {
-        isNative: Boolean(nativeHw),
-        displayName: `${brandPrefix} ${model}`.trim(),
+      const rawHwForCatalog = {
         manufacturer,
-        brand: brand || manufacturer,
+        brand,
         model,
-        deviceCode: nativeHw?.device || '',
         board: nativeHw?.board || '',
-        cpuName: nativeHw?.cpuName || `Procesador (${navigator.hardwareConcurrency || 4} hilos)`,
+        marketName: nativeHw?.marketName || '',
+        deviceNameSetting: nativeHw?.deviceNameSetting || '',
+        isTablet: Boolean(nativeHw?.isTablet),
+        cpuName: nativeHw?.cpuName || '',
+        socManufacturer: nativeHw?.socManufacturer || '',
+        socModel: nativeHw?.socModel || '',
+        socCodename: nativeHw?.socCodename || '',
+        hardwareCode: nativeHw?.hardwareCode || '',
+        hardwarePlatform: nativeHw?.hardwarePlatform || '',
+        chipName: nativeHw?.chipName || '',
         cpuCores: nativeHw?.cpuCores || navigator.hardwareConcurrency || 4,
         cpuMaxFreqMhz: nativeHw?.cpuMaxFreqMhz || 0,
         cpuArch: nativeHw?.cpuArch || (navigator.userAgent.includes('arm64') || navigator.userAgent.includes('aarch64') ? 'arm64-v8a' : '64-bit'),
+        gpu,
+      };
+
+      const deviceResolved = resolveCommercialDeviceName(rawHwForCatalog);
+      const socResolved = resolveCommercialSocName(rawHwForCatalog);
+      const cpuClusters = Array.isArray(nativeHw?.cpuClusters) ? nativeHw.cpuClusters : [];
+
+      const scannedData = {
+        isNative: Boolean(nativeHw),
+        displayName: deviceResolved.commercialName,
+        commercialName: deviceResolved.commercialName,
+        modelCode: deviceResolved.modelCode,
+        isTablet: deviceResolved.isTablet,
+        deviceFormLabel: deviceResolved.deviceFormLabel,
+        marketName: nativeHw?.marketName || '',
+        manufacturer,
+        brand: brand || manufacturer,
+        model,
+        deviceCode: nativeHw?.productDevice || nativeHw?.device || '',
+        board: nativeHw?.board || '',
+        cpuName: socResolved.commercialSoc,
+        commercialSoc: socResolved.commercialSoc,
+        socFactoryCode: socResolved.factoryCode,
+        socVendor: socResolved.vendor,
+        socCodename: nativeHw?.socCodename || '',
+        hardwarePlatform: nativeHw?.hardwarePlatform || '',
+        chipName: nativeHw?.chipName || '',
+        cpuClusters,
+        cpuGovernor: nativeHw?.cpuGovernor || '',
+        cpuCores: nativeHw?.cpuCores || navigator.hardwareConcurrency || 4,
+        cpuMaxFreqMhz: nativeHw?.cpuMaxFreqMhz || 0,
+        cpuArch: rawHwForCatalog.cpuArch,
         supportedAbis: nativeHw?.supportedAbis || '',
         ramTotalGb,
         ramAvailGb,
@@ -179,6 +223,7 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
         isRooted: Boolean(nativeHw?.isRooted),
         isEmulator: Boolean(nativeHw?.isEmulator),
         refreshRateHz: nativeHw?.refreshRateHz ?? null,
+        screenDiagonalInches: nativeHw?.screenDiagonalInches ?? null,
         connected: netInfo.connected,
         netType: (netInfo.connectionType || 'desconocida').toUpperCase(),
         gpu,
@@ -186,6 +231,49 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
       };
       setInfo(scannedData);
       onDeviceScanned?.(scannedData);
+
+      // Auto-enriquecimiento silencioso en segundo plano (y caché en localStorage) si no estaba en catálogo local
+      if (
+        Capacitor.isNativePlatform() &&
+        netInfo.connected &&
+        !aiEnrichedRef.current &&
+        (!deviceResolved.resolvedFromCatalog || !socResolved.resolvedFromCatalog)
+      ) {
+        aiEnrichedRef.current = true;
+        supabase.functions
+          .invoke('analizar-dispositivo-ia', { body: { telemetry: scannedData } })
+          .then(({ data, error }) => {
+            if (!error && data && data.origen === 'gemini-ia' && data.nombre_comercial) {
+              const socComp = Array.isArray(data.componentes)
+                ? data.componentes.find((c) => /soc|procesador/i.test(c.parte || ''))
+                : null;
+              const socMatch = socComp?.detalle?.match(
+                /(Qualcomm\s+Snapdragon[\w\s+-]+|MediaTek\s+(?:Dimensity|Helio)[\w\s+-]+|Samsung\s+Exynos\s+\d+|Google\s+Tensor(?:\s+G\d)?|UNISOC\s+[\w\s]+|HiSilicon\s+Kirin\s+\d+)/i
+              );
+              const enrichedName = data.nombre_comercial.trim();
+              const enrichedSoc = socMatch ? socMatch[1].trim() : null;
+
+              saveCachedAiIdentity(buildDeviceFingerprint(rawHwForCatalog), {
+                commercialName: enrichedName,
+                commercialSoc: enrichedSoc,
+              });
+
+              setInfo((prev) => {
+                if (!prev) return prev;
+                const updated = {
+                  ...prev,
+                  displayName: !deviceResolved.resolvedFromCatalog ? enrichedName : prev.displayName,
+                  commercialName: !deviceResolved.resolvedFromCatalog ? enrichedName : prev.commercialName,
+                  cpuName: !socResolved.resolvedFromCatalog && enrichedSoc ? enrichedSoc : prev.cpuName,
+                  commercialSoc: !socResolved.resolvedFromCatalog && enrichedSoc ? enrichedSoc : prev.commercialSoc,
+                };
+                onDeviceScanned?.(updated);
+                return updated;
+              });
+            }
+          })
+          .catch(() => {});
+      }
 
       // Registrar automáticamente el escaneo en el historial privado si hay sesión
       const nowMs = Date.now();
@@ -200,8 +288,8 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
           tipoEvento: 'Escaneo Android',
           prefix: 'SCAN',
           healthScore: score,
-          diagnostico: `Escaneo de hardware — ${scannedData.displayName} (${scannedData.os})`,
-          solucion: `RAM ${scannedData.ramTotalGb ?? '?'} GB · Almacenamiento ${scannedData.storageTotalGb ?? '?'} GB · Batería ${scannedData.batteryPct ?? '?'}% (${scannedData.batteryHealth}).`,
+          diagnostico: `Escaneo de hardware — ${scannedData.commercialName} (${scannedData.os})`,
+          solucion: `SoC ${scannedData.commercialSoc} · RAM ${scannedData.ramTotalGb ?? '?'} GB · Almacenamiento ${scannedData.storageTotalGb ?? '?'} GB · Batería ${scannedData.batteryPct ?? '?'}% (${scannedData.batteryHealth}).`,
         });
       }
     } finally {
@@ -224,6 +312,17 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
       let auditResult;
       if (!error && data && !data.error && data.nombre_comercial) {
         auditResult = data;
+        if (data.origen === 'gemini-ia') {
+          saveCachedAiIdentity(buildDeviceFingerprint(info), {
+            commercialName: data.nombre_comercial,
+            commercialSoc: info.commercialSoc,
+          });
+          setInfo((prev) =>
+            prev
+              ? { ...prev, displayName: data.nombre_comercial, commercialName: data.nombre_comercial }
+              : prev
+          );
+        }
       } else {
         auditResult = runLocalDeviceAudit(info);
       }
@@ -346,13 +445,18 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
   return (
     <div className="h-full w-full overflow-y-auto bg-[#0b0f19] text-zinc-100 p-4 pb-24">
       <div className="max-w-2xl mx-auto space-y-3.5">
-        {/* Header Identidad del Modelo */}
+        {/* Header Identidad Comercial del Modelo (Teléfono / Tablet) */}
         <div className="flex items-center justify-between bg-[#131c2e] border border-slate-800 rounded-2xl p-4">
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
               <span className="text-[10px] uppercase tracking-widest text-cyan-400 font-semibold">
                 {info?.isNative ? 'Telemetría Nativa Android' : 'Escáner de Dispositivo'}
               </span>
+              {info && (
+                <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-300 border border-violet-500/30">
+                  {info.isTablet ? 'Tablet' : 'Teléfono'}
+                </span>
+              )}
               {info?.cpuArch && (
                 <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">
                   {info.cpuArch}
@@ -360,10 +464,12 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
               )}
             </div>
             <h2 className="text-base font-bold text-white truncate mt-0.5">
-              {info ? info.displayName : 'Analizando hardware…'}
+              {info ? info.commercialName || info.displayName : 'Analizando hardware…'}
             </h2>
             {info && (
               <p className="text-[11px] text-slate-400 mt-0.5 truncate">
+                Modelo: <span className="font-mono text-slate-300">{info.modelCode || info.model}</span>
+                {' · '}
                 {info.os}
                 {info.board ? ` · Board: ${info.board}` : ''}
                 {user ? ` · Op: ${user.nickname}` : ''}
@@ -383,21 +489,58 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
         {/* Telemetría Profunda */}
         {info && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {/* Procesador (SoC) y Arquitectura */}
-            <div className="sm:col-span-2 bg-[#131c2e] border border-slate-800 rounded-xl p-4">
-              <div className="flex items-center justify-between">
+            {/* Procesador (SoC) y Clústeres estilo CPU-Z */}
+            <div className="sm:col-span-2 bg-[#131c2e] border border-slate-800 rounded-xl p-4 space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-cyan-400 text-[10px] font-semibold uppercase">
-                  <Cpu className="w-3.5 h-3.5" /> Procesador (SoC) &amp; Arquitectura
+                  <Cpu className="w-3.5 h-3.5" /> Procesador (SoC) · Perfil CPU-Z
                 </div>
                 <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded">
                   {info.cpuCores} Núcleos{info.cpuMaxFreqMhz ? ` @ ${(info.cpuMaxFreqMhz / 1000).toFixed(2)} GHz` : ''}
                 </span>
               </div>
-              <p className="text-sm font-bold text-white mt-1.5">{info.cpuName}</p>
-              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-400 mt-1.5 font-mono">
+
+              <div>
+                <p className="text-base font-bold text-white leading-snug">{info.commercialSoc || info.cpuName}</p>
+                <p className="text-[11px] text-slate-400 font-mono mt-0.5">
+                  Código fábrica: <strong className="text-slate-200">{info.socFactoryCode || info.socCodename || 'N/D'}</strong>
+                  {info.hardwarePlatform && info.hardwarePlatform !== info.socFactoryCode ? ` (${info.hardwarePlatform})` : ''}
+                  {info.cpuGovernor ? ` · Governor: ${info.cpuGovernor}` : ''}
+                </p>
+              </div>
+
+              {/* Topología real de clústeres ARM (solo cuando el kernel la expone) */}
+              {Array.isArray(info.cpuClusters) && info.cpuClusters.length > 0 && (
+                <div className="bg-[#0b0f19] border border-slate-800/90 rounded-xl p-2.5 space-y-1.5">
+                  <span className="text-[9px] uppercase tracking-wider text-slate-500 font-semibold block">
+                    Topología de Núcleos (Clústeres Reales)
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                    {info.cpuClusters.map((cl, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-center justify-between gap-2 bg-slate-900/70 border border-slate-800 rounded-lg px-2.5 py-1.5 text-[11px] font-mono"
+                      >
+                        <span className="text-cyan-300 font-semibold truncate">
+                          {cl.cores}× {cl.archName}
+                        </span>
+                        <span className="text-slate-300 shrink-0">
+                          {cl.maxFreqMhz > 0
+                            ? cl.minFreqMhz > 0
+                              ? `${cl.minFreqMhz}–${cl.maxFreqMhz} MHz`
+                              : `@ ${(cl.maxFreqMhz / 1000).toFixed(2)} GHz`
+                            : 'ARM64'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-400 font-mono">
                 <span>ABI: <strong className="text-slate-200">{info.cpuArch}</strong></span>
                 {info.supportedAbis && <span>Soportadas: {info.supportedAbis}</span>}
-                {info.deviceCode && <span>Código: {info.deviceCode}</span>}
+                {info.deviceCode && <span>Codename: {info.deviceCode}</span>}
               </div>
             </div>
 

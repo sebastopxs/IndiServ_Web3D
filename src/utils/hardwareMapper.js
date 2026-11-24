@@ -85,7 +85,7 @@ export function mapTelemetryTo3DProfile(telemetry) {
     .toLowerCase();
 
   let tipoEquipo = 'desktop';
-  if (explicitTipo === 'phone' || explicitTipo === 'smartphone' || explicitTipo === 'mobile') {
+  if (explicitTipo === 'phone' || explicitTipo === 'smartphone' || explicitTipo === 'mobile' || explicitTipo === 'tablet') {
     tipoEquipo = 'phone';
   } else if (explicitTipo === 'laptop' || explicitTipo === 'desktop') {
     tipoEquipo = explicitTipo;

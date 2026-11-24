@@ -11,7 +11,7 @@ import { mapTelemetryTo3DProfile } from './utils/hardwareMapper';
 import { supabase } from './supabaseClient';
 import {
   RotateCcw, Maximize2, Minimize2, EyeOff, Eye, FileDown, Laptop, Monitor,
-  Box, Search, Smartphone, LogOut, Stethoscope, Snowflake,
+  Box, Search, Smartphone, LogOut, Stethoscope, Snowflake, ArrowLeft,
 } from 'lucide-react';
 
 /* ═══════════════════════════════════════════
@@ -220,7 +220,41 @@ export default function App() {
   const [authUser, setAuthUser] = useState(null);
   const [guestUnlocked, setGuestUnlocked] = useState(!isNativeApp || Boolean(initialTicketParam));
   const [activeTab, setActiveTab] = useState(isNativeApp && !initialTicketParam ? 'scanner' : '3d');
+  const [tabHistory, setTabHistory] = useState([]);
   const [mobileDeviceInfo, setMobileDeviceInfo] = useState(null);
+
+  const navigateToTab = useCallback((nextTab) => {
+    setActiveTab((prev) => {
+      if (prev === nextTab) return prev;
+      setTabHistory((hist) => [...hist.slice(-11), prev]);
+      return nextTab;
+    });
+  }, []);
+
+  const goBackTab = useCallback(() => {
+    if (tabHistory.length > 0) {
+      const prevTab = tabHistory[tabHistory.length - 1];
+      setTabHistory((hist) => hist.slice(0, -1));
+      setActiveTab(prevTab);
+      return true;
+    }
+    if (activeTab !== 'scanner' && (isNativeApp || !initialTicketParam)) {
+      setActiveTab('scanner');
+      return true;
+    }
+    return false;
+  }, [tabHistory, activeTab, isNativeApp, initialTicketParam]);
+
+  // Puente para botón/gesto físico Atrás de Android (invocado desde MainActivity.java)
+  useEffect(() => {
+    window.__indiservHandleBack = () => {
+      const handled = goBackTab();
+      return handled ? 'handled' : 'exit';
+    };
+    return () => {
+      delete window.__indiservHandleBack;
+    };
+  }, [goBackTab]);
 
   const [telemetry, setTelemetry] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -301,9 +335,9 @@ export default function App() {
   }, [loadTicketById]);
 
   const handleSelectTicketFromMobile = useCallback(async (idTicket) => {
-    setActiveTab('3d');
+    navigateToTab('3d');
     await loadTicketById(idTicket);
-  }, [loadTicketById]);
+  }, [loadTicketById, navigateToTab]);
 
   const handleOpenPhone3D = useCallback(({
     deviceInfo,
@@ -376,8 +410,8 @@ export default function App() {
         ? { category: affectedComponent, nodeName: affectedComponent, data: phoneTelemetry.components[affectedComponent] }
         : null
     );
-    setActiveTab('3d');
-  }, [mobileDeviceInfo]);
+    navigateToTab('3d');
+  }, [mobileDeviceInfo, navigateToTab]);
 
   const handleSelect = useCallback((comp) => {
     setSelectedComponent(comp);
@@ -416,16 +450,29 @@ export default function App() {
     });
   }, [currentDeviceType]);
 
+  const showAppNav = isNativeApp || !initialTicketParam;
+  const canGoBack = tabHistory.length > 0 || (showAppNav && activeTab !== 'scanner');
+
+  const open3DTabSmart = useCallback(() => {
+    if (mobileDeviceInfo && (!telemetry || telemetry.id_ticket === 'TKT-DEMO-OFFLINE')) {
+      handleOpenPhone3D({ deviceInfo: mobileDeviceInfo });
+    } else {
+      navigateToTab('3d');
+    }
+  }, [mobileDeviceInfo, telemetry, handleOpenPhone3D, navigateToTab]);
+
   // Pantalla de Login/Registro en APK Android nativo (cuando aún no inicia sesión)
   if (!guestUnlocked && !authUser) {
     return (
       <MobileAuthView
         onAuthenticated={(user) => {
           setAuthUser(user);
+          setTabHistory([]);
           setActiveTab('scanner');
         }}
         onGuestDemo={() => {
           setGuestUnlocked(true);
+          setTabHistory([]);
           setActiveTab('scanner');
         }}
       />
@@ -434,38 +481,118 @@ export default function App() {
 
   return (
     <div className="w-screen h-screen flex flex-col md:flex-row bg-zinc-950 font-sans text-zinc-100 overflow-hidden relative">
+      {/* ── Rail Lateral Persistente para Tablets y Pantallas Medianas/Grandes (>= md) ── */}
+      {showAppNav && (
+        <aside className="hidden md:flex flex-col items-center justify-between w-[76px] shrink-0 bg-[#0f172a] border-r border-white/10 py-3 px-1.5 z-30">
+          <div className="flex flex-col items-center gap-2 w-full">
+            <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center mb-1">
+              <div className="w-3 h-3 bg-emerald-400 rounded-[3px]" />
+            </div>
+            {canGoBack && (
+              <button
+                onClick={goBackTab}
+                className="w-full flex flex-col items-center gap-0.5 py-2 px-1 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-cyan-300 border border-cyan-500/25 transition-colors mb-1"
+                title="Retroceder"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span className="text-[9px] font-semibold">Atrás</span>
+              </button>
+            )}
+            <TabletNavBtn icon={Smartphone} label="Equipo" active={activeTab === 'scanner'} onClick={() => navigateToTab('scanner')} />
+            <TabletNavBtn icon={Stethoscope} label="Diagnóst." active={activeTab === 'diagnostic'} onClick={() => navigateToTab('diagnostic')} />
+            <TabletNavBtn icon={Snowflake} label="Cuidado" active={activeTab === 'maintenance'} onClick={() => navigateToTab('maintenance')} />
+            <TabletNavBtn icon={Search} label="Tickets" active={activeTab === 'tickets'} onClick={() => navigateToTab('tickets')} />
+            <TabletNavBtn icon={Box} label="Visor 3D" active={activeTab === '3d'} onClick={open3DTabSmart} />
+          </div>
+          {isNativeApp && (
+            <TabletNavBtn
+              icon={LogOut}
+              label="Salir"
+              active={false}
+              onClick={() => {
+                setAuthUser(null);
+                setGuestUnlocked(false);
+                setTabHistory([]);
+              }}
+            />
+          )}
+        </aside>
+      )}
+
       {activeTab === 'scanner' ? (
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 overflow-hidden flex flex-col">
           <MobileScannerView
             user={authUser}
             onDeviceScanned={setMobileDeviceInfo}
             onOpenPhone3D={handleOpenPhone3D}
-            onOpenDiagnostic={() => setActiveTab('diagnostic')}
-            onOpenMaintenance={() => setActiveTab('maintenance')}
+            onOpenDiagnostic={() => navigateToTab('diagnostic')}
+            onOpenMaintenance={() => navigateToTab('maintenance')}
           />
         </div>
       ) : activeTab === 'diagnostic' ? (
-        <div className="flex-1 overflow-hidden">
-          <MobileDiagnosticView
-            deviceInfo={mobileDeviceInfo}
-            user={authUser}
-            onOpenPhone3D={handleOpenPhone3D}
-          />
+        <div className="flex-1 overflow-hidden flex flex-col">
+          {canGoBack && (
+            <div className="shrink-0 bg-[#0f172a] border-b border-white/10 px-3 py-2 flex items-center justify-between">
+              <button
+                onClick={goBackTab}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-cyan-300 hover:text-white bg-slate-800/80 px-3 py-1.5 rounded-lg transition-colors"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" /> Atrás
+              </button>
+              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Diagnóstico Experto</span>
+              <span className="w-12" />
+            </div>
+          )}
+          <div className="flex-1 overflow-hidden">
+            <MobileDiagnosticView
+              deviceInfo={mobileDeviceInfo}
+              user={authUser}
+              onOpenPhone3D={handleOpenPhone3D}
+            />
+          </div>
         </div>
       ) : activeTab === 'maintenance' ? (
-        <div className="flex-1 overflow-hidden">
-          <MobileMaintenanceView
-            deviceInfo={mobileDeviceInfo}
-            user={authUser}
-          />
+        <div className="flex-1 overflow-hidden flex flex-col">
+          {canGoBack && (
+            <div className="shrink-0 bg-[#0f172a] border-b border-white/10 px-3 py-2 flex items-center justify-between">
+              <button
+                onClick={goBackTab}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-cyan-300 hover:text-white bg-slate-800/80 px-3 py-1.5 rounded-lg transition-colors"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" /> Atrás
+              </button>
+              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Enfriamiento y Cuidado</span>
+              <span className="w-12" />
+            </div>
+          )}
+          <div className="flex-1 overflow-hidden">
+            <MobileMaintenanceView
+              deviceInfo={mobileDeviceInfo}
+              user={authUser}
+            />
+          </div>
         </div>
       ) : activeTab === 'tickets' ? (
-        <div className="flex-1 overflow-hidden">
-          <TicketLookupBar
-            user={authUser}
-            onSelectTicket={handleSelectTicketFromMobile}
-            onRequestLogin={() => setGuestUnlocked(false)}
-          />
+        <div className="flex-1 overflow-hidden flex flex-col">
+          {canGoBack && (
+            <div className="shrink-0 bg-[#0f172a] border-b border-white/10 px-3 py-2 flex items-center justify-between">
+              <button
+                onClick={goBackTab}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-cyan-300 hover:text-white bg-slate-800/80 px-3 py-1.5 rounded-lg transition-colors"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" /> Atrás
+              </button>
+              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Mis Tickets Privados</span>
+              <span className="w-12" />
+            </div>
+          )}
+          <div className="flex-1 overflow-hidden">
+            <TicketLookupBar
+              user={authUser}
+              onSelectTicket={handleSelectTicketFromMobile}
+              onRequestLogin={() => setGuestUnlocked(false)}
+            />
+          </div>
         </div>
       ) : (
         <>
@@ -492,8 +619,17 @@ export default function App() {
 
             {/* ── Top bar ── */}
             <div className="absolute top-0 left-0 right-0 pointer-events-none z-10 p-3 md:p-5 flex flex-wrap items-start justify-between gap-2">
-              {/* Brand & Connection Status */}
-              <div className="pointer-events-auto flex items-center gap-2.5 bg-zinc-950/75 backdrop-blur-md border border-white/[0.06] rounded-xl px-3 md:px-4 py-2 md:py-3 shadow-lg">
+              {/* Brand, Back & Connection Status */}
+              <div className="pointer-events-auto flex items-center gap-2 bg-zinc-950/75 backdrop-blur-md border border-white/[0.06] rounded-xl px-3 md:px-4 py-2 md:py-3 shadow-lg">
+                {canGoBack && (
+                  <button
+                    onClick={goBackTab}
+                    className="flex items-center gap-1 text-[11px] font-semibold text-cyan-300 hover:text-white bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/25 px-2.5 py-1 rounded-lg transition-colors mr-1"
+                    title="Volver a la pantalla anterior"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" /> Atrás
+                  </button>
+                )}
                 <div className="w-6 h-6 md:w-7 md:h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center">
                   <div className="w-2.5 h-2.5 bg-emerald-400 rounded-[3px]" />
                 </div>
@@ -559,25 +695,14 @@ export default function App() {
         </>
       )}
 
-      {/* ── Barra de Navegación Inferior (Visible en Móvil / Android App) ── */}
-      {(isNativeApp || !initialTicketParam) && (
+      {/* ── Barra de Navegación Inferior (Visible en Teléfonos < md) ── */}
+      {showAppNav && (
         <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-[#0f172a]/95 backdrop-blur-xl border-t border-white/10 px-1 py-2 flex items-center justify-around">
-          <MobileNavBtn icon={Smartphone} label="Android" active={activeTab === 'scanner'} onClick={() => setActiveTab('scanner')} />
-          <MobileNavBtn icon={Stethoscope} label="Diagnóst." active={activeTab === 'diagnostic'} onClick={() => setActiveTab('diagnostic')} />
-          <MobileNavBtn icon={Snowflake} label="Cuidado" active={activeTab === 'maintenance'} onClick={() => setActiveTab('maintenance')} />
-          <MobileNavBtn icon={Search} label="Tickets" active={activeTab === 'tickets'} onClick={() => setActiveTab('tickets')} />
-          <MobileNavBtn
-            icon={Box}
-            label="3D"
-            active={activeTab === '3d'}
-            onClick={() => {
-              if (mobileDeviceInfo && (!telemetry || telemetry.id_ticket === 'TKT-DEMO-OFFLINE')) {
-                handleOpenPhone3D({ deviceInfo: mobileDeviceInfo });
-              } else {
-                setActiveTab('3d');
-              }
-            }}
-          />
+          <MobileNavBtn icon={Smartphone} label="Android" active={activeTab === 'scanner'} onClick={() => navigateToTab('scanner')} />
+          <MobileNavBtn icon={Stethoscope} label="Diagnóst." active={activeTab === 'diagnostic'} onClick={() => navigateToTab('diagnostic')} />
+          <MobileNavBtn icon={Snowflake} label="Cuidado" active={activeTab === 'maintenance'} onClick={() => navigateToTab('maintenance')} />
+          <MobileNavBtn icon={Search} label="Tickets" active={activeTab === 'tickets'} onClick={() => navigateToTab('tickets')} />
+          <MobileNavBtn icon={Box} label="3D" active={activeTab === '3d'} onClick={open3DTabSmart} />
           {isNativeApp && (
             <MobileNavBtn
               icon={LogOut}
@@ -586,12 +711,29 @@ export default function App() {
               onClick={() => {
                 setAuthUser(null);
                 setGuestUnlocked(false);
+                setTabHistory([]);
               }}
             />
           )}
         </nav>
       )}
     </div>
+  );
+}
+
+function TabletNavBtn({ icon: Icon, label, active, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full flex flex-col items-center gap-1 py-2 px-1 rounded-xl transition-colors ${
+        active
+          ? 'text-emerald-400 bg-emerald-500/15 border border-emerald-500/30'
+          : 'text-slate-400 hover:text-white hover:bg-white/[0.04] border border-transparent'
+      }`}
+    >
+      <Icon className="w-4 h-4" />
+      <span className="text-[9px] font-medium leading-tight">{label}</span>
+    </button>
   );
 }
 

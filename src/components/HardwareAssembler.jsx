@@ -38,7 +38,7 @@ export function resolveModelPath(profile, telemetry) {
     .toString()
     .trim()
     .toLowerCase();
-  if (rawTipo === 'phone' || rawTipo === 'smartphone' || rawTipo === 'mobile') {
+  if (rawTipo === 'phone' || rawTipo === 'smartphone' || rawTipo === 'mobile' || rawTipo === 'tablet') {
     return PHONE_MODEL_PATH;
   }
   return rawTipo === 'laptop' ? LAPTOP_MODEL_PATH : DESKTOP_MODEL_PATH;
