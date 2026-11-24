@@ -1,0 +1,170 @@
+/**
+ * security.js — Criptografía WebCrypto, Rate-Limiting y Motor de Honeytokens (Web + Android APK)
+ */
+
+import { supabase } from '../supabaseClient.js';
+
+const HASH_PREFIX = 'indiserv_v1$';
+const HASH_SALT_NAMESPACE = 'INDISERV_SALT_2026';
+
+export const HONEY_DNIS = new Set(['00000000', '99999999', '12345678', '87654321', '11111111', 'admin', 'root']);
+export const HONEY_EMAILS = new Set([
+  'admin@indiserv.pe',
+  'root@indiserv.pe',
+  'soporte@indiserv.pe',
+  'security@indiserv.pe',
+  'administrator@indiserv.pe',
+  'admin@unmsm.edu.pe',
+]);
+export const HONEY_TICKETS = new Set([
+  '0000-ADMIN-ROOT',
+  'TKT-ADMIN-MASTER',
+  'TKT-BACKUP-DB',
+  '9999-TICKET-0000',
+]);
+
+let failedAttempts = [];
+let lockoutUntilMs = 0;
+
+function randomHex(bytesLen = 4) {
+  const arr = new Uint8Array(bytesLen);
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    crypto.getRandomValues(arr);
+  } else {
+    for (let i = 0; i < bytesLen; i++) arr[i] = Math.floor(Math.random() * 256);
+  }
+  return Array.from(arr, (b) => b.toString(16).padStart(2, '0'))
+    .join('')
+    .toUpperCase();
+}
+
+export function generateSecureTicketId(dniOrPrefix, tag = 'MOB') {
+  const clean = String(dniOrPrefix || '').trim();
+  const pref = clean.length >= 4 ? clean.slice(0, 4) : 'MOB';
+  return `${pref}-${tag}-${randomHex(4)}`;
+}
+
+export async function hashPassword(dni, password) {
+  const cleanDni = String(dni || '').trim();
+  const cleanPass = String(password || '');
+  if (cleanPass.startsWith(HASH_PREFIX)) return cleanPass;
+
+  const raw = `${HASH_SALT_NAMESPACE}::${cleanDni}::${cleanPass}`;
+  const enc = new TextEncoder().encode(raw);
+  const digest = await crypto.subtle.digest('SHA-256', enc);
+  const hex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+  return `${HASH_PREFIX}${hex}`;
+}
+
+export async function verifyPassword(dni, plainPassword, storedHash) {
+  if (!storedHash || !plainPassword) return { valid: false, needsMigration: false };
+  const expected = await hashPassword(dni, plainPassword);
+  if (storedHash.startsWith(HASH_PREFIX)) {
+    return { valid: storedHash === expected, needsMigration: false };
+  }
+  const legacyValid = storedHash === plainPassword;
+  return { valid: legacyValid, needsMigration: legacyValid };
+}
+
+export function checkLoginRateLimit() {
+  const now = Date.now();
+  if (now < lockoutUntilMs) {
+    return { allowed: false, waitSeconds: Math.max(1, Math.ceil((lockoutUntilMs - now) / 1000)) };
+  }
+  return { allowed: true, waitSeconds: 0 };
+}
+
+export function recordFailedLogin(dni, correo) {
+  const now = Date.now();
+  failedAttempts = failedAttempts.filter((t) => now - t < 300_000);
+  failedAttempts.push(now);
+  if (failedAttempts.length >= 5) {
+    lockoutUntilMs = now + 60_000;
+    failedAttempts = [];
+    triggerHoneytokenAlert('FUERZA_BRUTA_LOGIN', `5 intentos fallidos sobre DNI='${dni}' correo='${correo}'`);
+    return { locked: true, waitSeconds: 60 };
+  }
+  return { locked: false, waitSeconds: 0 };
+}
+
+export function resetLoginRateLimit() {
+  failedAttempts = [];
+  lockoutUntilMs = 0;
+}
+
+export function isHoneyCredential(dni, correo = '') {
+  const d = String(dni || '').trim().toLowerCase();
+  const c = String(correo || '').trim().toLowerCase();
+  if (HONEY_DNIS.has(d) || HONEY_EMAILS.has(c)) return true;
+  if (['canary', 'honeypot', "' or ", '1=1', 'union select'].some((k) => d.includes(k) || c.includes(k))) {
+    return true;
+  }
+  return false;
+}
+
+export function isHoneyTicket(ticketId) {
+  const t = String(ticketId || '').trim().toUpperCase();
+  if (HONEY_TICKETS.has(t)) return true;
+  const low = t.toLowerCase();
+  if (["' or ", '1=1', 'union select', '<script', '../', 'admin-root'].some((k) => low.includes(k))) {
+    return true;
+  }
+  return false;
+}
+
+export async function triggerHoneytokenAlert(tipo, detalle) {
+  const alertId = `HONEY-${randomHex(4)}`;
+  const ts = new Date().toISOString().replace('T', ' ').slice(0, 19);
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 110) : 'Web/Android';
+  const sugerencia = `[ALERTA-HONEYTOKEN] ${tipo} | ${detalle} | UA: ${ua} | Fecha: ${ts}`;
+
+  try {
+    await supabase
+      .from('sugerencias_locales')
+      .upsert({ id_ticket: alertId, sugerencia }, { onConflict: 'id_ticket' });
+  } catch {
+    // Silencioso para no alertar al atacante
+  }
+  return alertId;
+}
+
+export async function fetchHoneytokenAlerts(limit = 15) {
+  try {
+    const { data, error } = await supabase
+      .from('sugerencias_locales')
+      .select('id_ticket, sugerencia')
+      .like('id_ticket', 'HONEY-%')
+      .order('id_ticket', { ascending: false })
+      .limit(limit);
+    if (error) return [];
+    return data || [];
+  } catch {
+    return [];
+  }
+}
+
+export function installBrowserConsoleHoneypot() {
+  if (typeof window === 'undefined' || window.__indiservHoneypotInstalled) return;
+  window.__indiservHoneypotInstalled = true;
+
+  try {
+    Object.defineProperty(window, '__INDISERV_ADMIN_VAULT__', {
+      configurable: true,
+      get() {
+        triggerHoneytokenAlert('DEVTOOLS_CONSOLE_TRAP', 'Acceso a window.__INDISERV_ADMIN_VAULT__ desde consola DevTools');
+        return {
+          status: 'LOCKED_CANARY',
+          masterKey: 'ag_canary_9f8e7d6c5b4a3f2e1d0c',
+          adminAccount: 'admin@indiserv.pe',
+        };
+      },
+    });
+
+    window.dumpAllUsers = function () {
+      triggerHoneytokenAlert('DEVTOOLS_DUMP_USERS', 'Invocación de window.dumpAllUsers() desde consola DevTools');
+      return 'Access Denied — Incident logged (D3-DUC)';
+    };
+  } catch {
+    // Ignore in strict environments
+  }
+}

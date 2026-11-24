@@ -4,6 +4,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { supabase } from '../supabaseClient';
+import { generateSecureTicketId } from '../utils/security';
 import {
   Stethoscope, BatteryWarning, Cpu, HardDrive, MonitorPlay, Wifi, ShieldAlert,
   ChevronRight, ArrowLeft, Search, CheckCircle2, AlertTriangle, Wrench,
@@ -424,7 +425,7 @@ export default function MobileDiagnosticView({ deviceInfo, user, onOpenPhone3D }
     setSavingTicket(true);
     setSaveError('');
 
-    const ticketId = savedTicketId || generatePhoneTicketId();
+    const ticketId = savedTicketId || generateSecureTicketId(user?.dni || 'MOB', 'DIAG');
     const healthScore = computeHealthScore(selectedCase.severity);
     const solucionText = selectedCase.steps.map((s, i) => `${i + 1}. ${s}`).join('\n');
     const cpuLabel = deviceInfo?.cpuName

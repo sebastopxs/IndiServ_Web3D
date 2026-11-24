@@ -5,6 +5,15 @@
 import React, { useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { POLITICA_PRIVACIDAD_TEXTO, VERSION_POLITICA } from '../utils/legalPolicy';
+import {
+  hashPassword,
+  verifyPassword,
+  checkLoginRateLimit,
+  recordFailedLogin,
+  resetLoginRateLimit,
+  isHoneyCredential,
+  triggerHoneytokenAlert,
+} from '../utils/security';
 import { ShieldCheck, LogIn, UserPlus, Eye, EyeOff, FileText, X, CheckCircle2, AlertCircle } from 'lucide-react';
 
 export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
@@ -34,6 +43,21 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
       return;
     }
 
+    const rate = checkLoginRateLimit();
+    if (!rate.allowed) {
+      setError(`⏳ Demasiados intentos fallidos. Espere ${rate.waitSeconds} s.`);
+      return;
+    }
+
+    if (isHoneyCredential(cleanDni, cleanCorreo)) {
+      triggerHoneytokenAlert(
+        'CREDENCIAL_SENUELO_LOGIN_MOVIL',
+        `Intento de login en cuenta trampa DNI='${cleanDni}' correo='${cleanCorreo}'`
+      );
+      setError('Credenciales incorrectas o cuenta inexistente.');
+      return;
+    }
+
     setLoading(true);
     try {
       const { data, error: dbErr } = await supabase
@@ -44,14 +68,32 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
 
       if (dbErr) throw dbErr;
       const user = data?.[0];
-      if (user && user.correo === cleanCorreo && user.password_hash === cleanPass) {
+      const check = user
+        ? await verifyPassword(cleanDni, cleanPass, user.password_hash)
+        : { valid: false, needsMigration: false };
+
+      if (user && user.correo === cleanCorreo && check.valid) {
+        resetLoginRateLimit();
+        if (check.needsMigration) {
+          const upgradedHash = await hashPassword(cleanDni, cleanPass);
+          supabase
+            .from('usuarios_app')
+            .update({ password_hash: upgradedHash })
+            .eq('dni', cleanDni)
+            .then(() => {});
+        }
         onAuthenticated({
           dni: cleanDni,
           correo: user.correo,
           nickname: user.nickname || 'Operador',
         });
       } else {
-        setError('Credenciales incorrectas o cuenta inexistente.');
+        const lock = recordFailedLogin(cleanDni, cleanCorreo);
+        if (lock.locked) {
+          setError(`⏳ Cuenta protegida contra fuerza bruta. Espere ${lock.waitSeconds} s.`);
+        } else {
+          setError('Credenciales incorrectas o cuenta inexistente.');
+        }
       }
     } catch (err) {
       setError(`Error de conexión: ${err?.message || 'Verifique internet'}`);
@@ -76,6 +118,15 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
     }
     if (!aceptaPolitica) {
       setError('Debe leer y aceptar la Política de Privacidad y Términos antes de registrarse.');
+      return;
+    }
+
+    if (isHoneyCredential(cleanDni, cleanCorreo)) {
+      triggerHoneytokenAlert(
+        'CREDENCIAL_SENUELO_REGISTRO_MOVIL',
+        `Intento de registro con identidad trampa DNI='${cleanDni}' correo='${cleanCorreo}'`
+      );
+      setError('El DNI no figura en el padrón oficial público UNMSM.');
       return;
     }
 
@@ -106,10 +157,11 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
         return;
       }
 
+      const hashedPass = await hashPassword(cleanDni, cleanPass);
       const { error: errIns } = await supabase.from('usuarios_app').insert({
         dni: cleanDni,
         correo: cleanCorreo,
-        password_hash: cleanPass,
+        password_hash: hashedPass,
         nickname: cleanNick,
       });
 

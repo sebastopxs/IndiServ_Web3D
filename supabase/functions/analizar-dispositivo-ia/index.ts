@@ -89,8 +89,25 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const body = await req.json();
-    const telemetry: TelemetryInput = body?.telemetry || body || {};
+    const rawBodyText = await req.text();
+    if (rawBodyText.length > 4096) {
+      return new Response(
+        JSON.stringify({ error: "Payload excede el límite de seguridad permitido (4 KB)." }),
+        { headers: { ...CORS_HEADERS, "Content-Type": "application/json" }, status: 413 },
+      );
+    }
+    const body = rawBodyText ? JSON.parse(rawBodyText) : {};
+    const rawTelemetry: Record<string, unknown> = body?.telemetry || body || {};
+
+    // Sanitizar y truncar campos de texto antes de interpolar en el prompt
+    const telemetry: TelemetryInput = {};
+    for (const [k, v] of Object.entries(rawTelemetry)) {
+      if (typeof v === "string") {
+        (telemetry as Record<string, unknown>)[k] = v.slice(0, 140);
+      } else if (typeof v === "number" || typeof v === "boolean" || v === null) {
+        (telemetry as Record<string, unknown>)[k] = v;
+      }
+    }
     const apiKey = Deno.env.get("GEMINI_API_KEY");
 
     if (!apiKey) {

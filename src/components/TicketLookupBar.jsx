@@ -5,13 +5,21 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../supabaseClient';
 import {
-  Search, Laptop, Monitor, Smartphone, ArrowRight, RefreshCw, Lock, LogIn,
+  isHoneyTicket,
+  triggerHoneytokenAlert,
+  fetchHoneytokenAlerts,
+} from '../utils/security';
+import {
+  Search, Laptop, Monitor, Smartphone, ArrowRight, RefreshCw, Lock, LogIn, ShieldAlert,
 } from 'lucide-react';
 
 export default function TicketLookupBar({ user, onSelectTicket, onRequestLogin }) {
   const [query, setQuery] = useState('');
   const [recent, setRecent] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [showHoneyAlerts, setShowHoneyAlerts] = useState(false);
+  const [honeyAlerts, setHoneyAlerts] = useState([]);
+  const [loadingAlerts, setLoadingAlerts] = useState(false);
 
   const ownerDni = user?.dni ? String(user.dni).trim() : '';
 
@@ -49,7 +57,25 @@ export default function TicketLookupBar({ user, onSelectTicket, onRequestLogin }
   const handleSubmit = (e) => {
     e.preventDefault();
     const cleaned = query.trim();
-    if (cleaned) onSelectTicket(cleaned);
+    if (!cleaned) return;
+    if (isHoneyTicket(cleaned)) {
+      triggerHoneytokenAlert(
+        'TICKET_SENUELO_BUSCADOR',
+        `Intento de consulta manual sobre ticket trampa o payload '${cleaned.slice(0, 80)}'`
+      );
+    }
+    onSelectTicket(cleaned);
+  };
+
+  const handleToggleHoneyAlerts = async () => {
+    const next = !showHoneyAlerts;
+    setShowHoneyAlerts(next);
+    if (next) {
+      setLoadingAlerts(true);
+      const list = await fetchHoneytokenAlerts(15);
+      setHoneyAlerts(list);
+      setLoadingAlerts(false);
+    }
   };
 
   const maskedDni = ownerDni.length >= 4 ? `••••${ownerDni.slice(-4)}` : ownerDni;
@@ -103,13 +129,52 @@ export default function TicketLookupBar({ user, onSelectTicket, onRequestLogin }
               {ownerDni ? `Mis Tickets Privados (DNI ${maskedDni})` : 'Historial Privado en la Nube'}
             </p>
             {ownerDni && (
-              <span className="text-[10px] text-slate-500 font-mono">
-                {recent.length} reporte{recent.length === 1 ? '' : 's'}
-              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleToggleHoneyAlerts}
+                  className={`text-[10px] font-semibold px-2 py-0.5 rounded-lg border flex items-center gap-1 transition-colors ${
+                    showHoneyAlerts
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                      : 'bg-slate-800/80 text-amber-400/90 border-slate-700 hover:bg-slate-800'
+                  }`}
+                >
+                  <ShieldAlert className="w-3 h-3" />
+                  {showHoneyAlerts ? 'Ver Mis Tickets' : '🍯 Alertas Honeytoken'}
+                </button>
+                <span className="text-[10px] text-slate-500 font-mono">
+                  {recent.length} reporte{recent.length === 1 ? '' : 's'}
+                </span>
+              </div>
             )}
           </div>
 
-          {!ownerDni ? (
+          {ownerDni && showHoneyAlerts ? (
+            loadingAlerts ? (
+              <div className="p-6 text-center text-xs text-slate-500">Consultando alertas Honeytoken…</div>
+            ) : honeyAlerts.length === 0 ? (
+              <div className="bg-[#131c2e] border border-emerald-500/25 rounded-2xl p-6 text-center text-xs text-emerald-300">
+                ✔ 0 alertas de Honeytoken disparadas. Ningún intruso ha tocado las trampas señuelo.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {honeyAlerts.map((al) => (
+                  <div
+                    key={al.id_ticket}
+                    className="bg-[#131c2e] border border-rose-500/35 rounded-xl p-3 text-xs space-y-1"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono font-bold text-rose-300">🍯 {al.id_ticket}</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-300 font-semibold">
+                        INTRUSIÓN DETECTADA
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-300 font-mono break-words">{al.sugerencia}</p>
+                  </div>
+                ))}
+              </div>
+            )
+          ) : !ownerDni ? (
             <div className="bg-[#131c2e] border border-slate-800 rounded-2xl p-6 text-center space-y-3">
               <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center mx-auto">
                 <Lock className="w-5 h-5 text-emerald-400" />

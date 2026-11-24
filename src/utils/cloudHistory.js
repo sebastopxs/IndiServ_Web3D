@@ -1,4 +1,5 @@
 import { supabase } from '../supabaseClient';
+import { generateSecureTicketId } from './security';
 
 /**
  * Registra automáticamente un evento de diagnóstico/escaneo/test móvil en
@@ -17,9 +18,7 @@ export async function recordMobileEvent({
   const ownerDni = user?.dni ? String(user.dni).trim() : '';
   if (!ownerDni || !deviceInfo) return null;
 
-  const dniPrefix = ownerDni.length >= 4 ? ownerDni.slice(0, 4) : 'MOB';
-  const rand = Math.floor(1000 + Math.random() * 9000);
-  const ticketId = `${dniPrefix}-${prefix}-${rand}`;
+  const ticketId = generateSecureTicketId(ownerDni, prefix);
 
   const cpuLabel = deviceInfo.cpuName
     ? `${deviceInfo.cpuName} (${deviceInfo.cpuCores || 8} núcleos · ${deviceInfo.cpuArch || 'arm64-v8a'})`

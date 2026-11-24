@@ -15,6 +15,11 @@ import TicketLookupBar from './components/TicketLookupBar';
 import { mapTelemetryTo3DProfile } from './utils/hardwareMapper';
 import { supabase } from './supabaseClient';
 import {
+  installBrowserConsoleHoneypot,
+  isHoneyTicket,
+  triggerHoneytokenAlert,
+} from './utils/security';
+import {
   RotateCcw, Maximize2, Minimize2, EyeOff, Eye, FileDown, Laptop, Monitor,
   Box, Search, Smartphone, LogOut, Stethoscope, Snowflake, ArrowLeft,
 } from 'lucide-react';
@@ -318,9 +323,26 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    installBrowserConsoleHoneypot();
     const params = new URLSearchParams(window.location.search);
     const ticketParam = params.get('ticket')?.trim() || '';
     const tipoParam = params.get('tipo')?.trim()?.toLowerCase() || '';
+
+    const trapParams = ['admin', 'debug', 'dump', 'sql', 'config', 'env', 'backup'];
+    const touchedTrap = trapParams.find((p) => params.has(p));
+    if (touchedTrap) {
+      triggerHoneytokenAlert(
+        'URL_RECON_PARAMETER',
+        `Parámetro trampa '?${touchedTrap}=${params.get(touchedTrap)}' detectado en URL`
+      );
+    }
+    if (ticketParam && isHoneyTicket(ticketParam)) {
+      triggerHoneytokenAlert(
+        'TICKET_SENUELO_URL',
+        `Acceso directo por URL a ticket trampa '?ticket=${ticketParam.slice(0, 80)}'`
+      );
+    }
+
     loadTicketById(ticketParam, tipoParam);
   }, [loadTicketById]);
 
