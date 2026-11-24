@@ -69,6 +69,19 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
         p_password_hash: hashedInput,
       });
 
+      if (rpcErr) {
+        const msg = String(rpcErr.message || '').toLowerCase();
+        const code = String(rpcErr.code || '').toUpperCase();
+        const isMissingRpc =
+          code === 'PGRST202' ||
+          code === '42883' ||
+          msg.includes('could not find the function') ||
+          msg.includes('does not exist');
+        if (!isMissingRpc) {
+          throw rpcErr;
+        }
+      }
+
       if (!rpcErr && rpcData && typeof rpcData === 'object' && 'ok' in rpcData) {
         if (rpcData.ok) {
           resetLoginRateLimit();
