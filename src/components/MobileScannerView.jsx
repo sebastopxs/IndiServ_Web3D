@@ -8,7 +8,7 @@ import { recordMobileEvent } from '../utils/cloudHistory';
 import {
   Cpu, BatteryCharging, Wifi, Smartphone, MonitorPlay, Play, Square,
   Activity, RefreshCw, HardDrive, MemoryStick, ShieldCheck, Thermometer,
-  Sparkles, CheckCircle2, AlertTriangle, ShieldAlert, Box, Zap, Stethoscope,
+  Sparkles, CheckCircle2, AlertTriangle, ShieldAlert, Box, Zap, Stethoscope, Snowflake,
 } from 'lucide-react';
 
 const HardwareInfo = registerPlugin('HardwareInfo');
@@ -72,7 +72,7 @@ function UsageBar({ pct, color = 'from-cyan-500 to-emerald-400' }) {
   );
 }
 
-export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D, onOpenDiagnostic }) {
+export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D, onOpenDiagnostic, onOpenMaintenance }) {
   const [info, setInfo] = useState(null);
   const [scanning, setScanning] = useState(true);
 
@@ -527,19 +527,25 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
               </div>
             </div>
 
-            {/* Acciones rápidas: Gemelo Digital 3D del Teléfono y Árbol de Diagnóstico */}
-            <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            {/* Acciones rápidas: Gemelo Digital 3D, Diagnóstico y Enfriamiento/Mantenimiento */}
+            <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
               <button
                 onClick={() => onOpenPhone3D?.({ deviceInfo: info })}
-                className="py-2.5 px-3.5 rounded-xl bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-950/40"
+                className="py-2.5 px-3 rounded-xl bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-all shadow-lg shadow-emerald-950/40"
               >
-                <Box className="w-4 h-4" /> Ver mi Teléfono en 3D
+                <Box className="w-4 h-4" /> Teléfono 3D
               </button>
               <button
                 onClick={() => onOpenDiagnostic?.()}
-                className="py-2.5 px-3.5 rounded-xl bg-[#131c2e] hover:bg-slate-800 border border-emerald-500/35 text-emerald-300 text-xs font-semibold flex items-center justify-center gap-2 transition-colors"
+                className="py-2.5 px-3 rounded-xl bg-[#131c2e] hover:bg-slate-800 border border-emerald-500/35 text-emerald-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
               >
-                <Stethoscope className="w-4 h-4" /> Abrir Árbol de Diagnóstico
+                <Stethoscope className="w-4 h-4" /> Diagnóstico
+              </button>
+              <button
+                onClick={() => onOpenMaintenance?.()}
+                className="py-2.5 px-3 rounded-xl bg-[#131c2e] hover:bg-slate-800 border border-cyan-500/35 text-cyan-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+              >
+                <Snowflake className="w-4 h-4" /> Enfriamiento
               </button>
             </div>
 

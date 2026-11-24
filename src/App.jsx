@@ -5,12 +5,13 @@ import TechSidebar from './components/TechSidebar';
 import MobileAuthView from './components/MobileAuthView';
 import MobileScannerView from './components/MobileScannerView';
 import MobileDiagnosticView from './components/MobileDiagnosticView';
+import MobileMaintenanceView from './components/MobileMaintenanceView';
 import TicketLookupBar from './components/TicketLookupBar';
 import { mapTelemetryTo3DProfile } from './utils/hardwareMapper';
 import { supabase } from './supabaseClient';
 import {
   RotateCcw, Maximize2, Minimize2, EyeOff, Eye, FileDown, Laptop, Monitor,
-  Box, Search, Smartphone, LogOut, Stethoscope,
+  Box, Search, Smartphone, LogOut, Stethoscope, Snowflake,
 } from 'lucide-react';
 
 /* ═══════════════════════════════════════════
@@ -440,6 +441,7 @@ export default function App() {
             onDeviceScanned={setMobileDeviceInfo}
             onOpenPhone3D={handleOpenPhone3D}
             onOpenDiagnostic={() => setActiveTab('diagnostic')}
+            onOpenMaintenance={() => setActiveTab('maintenance')}
           />
         </div>
       ) : activeTab === 'diagnostic' ? (
@@ -448,6 +450,13 @@ export default function App() {
             deviceInfo={mobileDeviceInfo}
             user={authUser}
             onOpenPhone3D={handleOpenPhone3D}
+          />
+        </div>
+      ) : activeTab === 'maintenance' ? (
+        <div className="flex-1 overflow-hidden">
+          <MobileMaintenanceView
+            deviceInfo={mobileDeviceInfo}
+            user={authUser}
           />
         </div>
       ) : activeTab === 'tickets' ? (
@@ -552,13 +561,14 @@ export default function App() {
 
       {/* ── Barra de Navegación Inferior (Visible en Móvil / Android App) ── */}
       {(isNativeApp || !initialTicketParam) && (
-        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-[#0f172a]/95 backdrop-blur-xl border-t border-white/10 px-1.5 py-2 flex items-center justify-around">
-          <MobileNavBtn icon={Smartphone} label="Mi Android" active={activeTab === 'scanner'} onClick={() => setActiveTab('scanner')} />
-          <MobileNavBtn icon={Stethoscope} label="Diagnóstico" active={activeTab === 'diagnostic'} onClick={() => setActiveTab('diagnostic')} />
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-[#0f172a]/95 backdrop-blur-xl border-t border-white/10 px-1 py-2 flex items-center justify-around">
+          <MobileNavBtn icon={Smartphone} label="Android" active={activeTab === 'scanner'} onClick={() => setActiveTab('scanner')} />
+          <MobileNavBtn icon={Stethoscope} label="Diagnóst." active={activeTab === 'diagnostic'} onClick={() => setActiveTab('diagnostic')} />
+          <MobileNavBtn icon={Snowflake} label="Cuidado" active={activeTab === 'maintenance'} onClick={() => setActiveTab('maintenance')} />
           <MobileNavBtn icon={Search} label="Tickets" active={activeTab === 'tickets'} onClick={() => setActiveTab('tickets')} />
           <MobileNavBtn
             icon={Box}
-            label="Visor 3D"
+            label="3D"
             active={activeTab === '3d'}
             onClick={() => {
               if (mobileDeviceInfo && (!telemetry || telemetry.id_ticket === 'TKT-DEMO-OFFLINE')) {
@@ -571,7 +581,7 @@ export default function App() {
           {isNativeApp && (
             <MobileNavBtn
               icon={LogOut}
-              label="Cuenta"
+              label="Salir"
               active={false}
               onClick={() => {
                 setAuthUser(null);
@@ -589,12 +599,12 @@ function MobileNavBtn({ icon: Icon, label, active, onClick }) {
   return (
     <button
       onClick={onClick}
-      className={`flex flex-col items-center gap-0.5 px-3 py-1 rounded-lg transition-colors ${
+      className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg transition-colors ${
         active ? 'text-emerald-400 bg-emerald-500/10' : 'text-slate-400 hover:text-white'
       }`}
     >
       <Icon className="w-4 h-4" />
-      <span className="text-[10px] font-medium">{label}</span>
+      <span className="text-[9px] font-medium leading-tight">{label}</span>
     </button>
   );
 }
