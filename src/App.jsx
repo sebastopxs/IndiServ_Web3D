@@ -3,15 +3,16 @@
  * Coordina autenticación, escáner nativo, diagnóstico, mantenimiento, tickets privados y visor 3D.
  */
 
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { Suspense, lazy, useEffect, useState, useCallback, useMemo } from 'react';
 import { Capacitor } from '@capacitor/core';
-import ChassisScene from './components/ChassisScene';
 import TechSidebar from './components/TechSidebar';
 import MobileAuthView from './components/MobileAuthView';
 import MobileScannerView from './components/MobileScannerView';
 import MobileDiagnosticView from './components/MobileDiagnosticView';
 import MobileMaintenanceView from './components/MobileMaintenanceView';
 import TicketLookupBar from './components/TicketLookupBar';
+
+const ChassisScene = lazy(() => import('./components/ChassisScene'));
 import { mapTelemetryTo3DProfile } from './utils/hardwareMapper';
 import { supabase } from './supabaseClient';
 import {
@@ -625,13 +626,26 @@ export default function App() {
               </div>
             ) : (
               <CanvasErrorBoundary>
-                <MemoizedChassisScene
-                  profile={profile}
-                  telemetry={telemetry}
-                  onSelectComponent={handleSelect}
-                  explodedView={explodedView}
-                  registerReset={(fn) => setResetCameraFn(() => fn)}
-                />
+                <Suspense
+                  fallback={
+                    <div className="absolute inset-0 flex items-center justify-center bg-[#090c12]">
+                      <div className="flex flex-col items-center gap-3">
+                        <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+                        <span className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-medium">
+                          Inicializando motor 3D WebGL
+                        </span>
+                      </div>
+                    </div>
+                  }
+                >
+                  <MemoizedChassisScene
+                    profile={profile}
+                    telemetry={telemetry}
+                    onSelectComponent={handleSelect}
+                    explodedView={explodedView}
+                    registerReset={(fn) => setResetCameraFn(() => fn)}
+                  />
+                </Suspense>
               </CanvasErrorBoundary>
             )}
 

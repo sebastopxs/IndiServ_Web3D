@@ -1,7 +1,6 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
-import HardwarePart from './HardwarePart';
 
 /**
  * HardwareAssembler
@@ -91,10 +90,11 @@ function detectCategory(object) {
 }
 
 function SceneMesh({ modelPath, profile, telemetry, onSelect, explodedView }) {
-
   const { scene } = useGLTF(modelPath);
+  const settledRef = useRef(false);
 
-  useMemo(() => {
+  const animatableMeshes = useMemo(() => {
+    const meshes = [];
     scene.traverse((child) => {
       if (child.isMesh) {
         child.castShadow = true;
@@ -106,17 +106,31 @@ function SceneMesh({ modelPath, profile, telemetry, onSelect, explodedView }) {
           if (dir.lengthSq() === 0) dir.set(0, 1, 0);
           child.userData._explodedPos = child.position.clone().add(dir.multiplyScalar(4));
         }
+        meshes.push(child);
       }
     });
+    return meshes;
   }, [scene]);
 
+  useEffect(() => {
+    settledRef.current = false;
+  }, [explodedView, animatableMeshes]);
+
   useFrame((_, delta) => {
-    scene.traverse((child) => {
-      if (child.isMesh && child.userData._origPos) {
-        const target = explodedView ? child.userData._explodedPos : child.userData._origPos;
-        child.position.lerp(target, delta * 6);
+    if (settledRef.current) return;
+    const alpha = Math.min(1, delta * 6);
+    let moving = false;
+    for (let i = 0; i < animatableMeshes.length; i++) {
+      const child = animatableMeshes[i];
+      const target = explodedView ? child.userData._explodedPos : child.userData._origPos;
+      if (child.position.distanceToSquared(target) > 0.0001) {
+        child.position.lerp(target, alpha);
+        moving = true;
+      } else {
+        child.position.copy(target);
       }
-    });
+    }
+    if (!moving) settledRef.current = true;
   });
 
   const handlePointerDown = useCallback((e) => {
