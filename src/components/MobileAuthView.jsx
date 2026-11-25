@@ -2,7 +2,7 @@
  * MobileAuthView.jsx — Pantalla de inicio de sesión y registro validado contra padrón UNMSM en Supabase.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { POLITICA_PRIVACIDAD_TEXTO, VERSION_POLITICA } from '../utils/legalPolicy';
 import {
@@ -13,8 +13,11 @@ import {
   resetLoginRateLimit,
   isHoneyCredential,
   triggerHoneytokenAlert,
+  getDeviceFingerprint,
+  saveSessionToken,
+  callAuthOtp,
 } from '../utils/security';
-import { ShieldCheck, LogIn, UserPlus, Eye, EyeOff, FileText, X, CheckCircle2, AlertCircle } from 'lucide-react';
+import { ShieldCheck, LogIn, UserPlus, Eye, EyeOff, FileText, X, CheckCircle2, AlertCircle, KeyRound, RefreshCw } from 'lucide-react';
 
 export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
   const [mode, setMode] = useState('login');
@@ -28,6 +31,23 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [otpChallenge, setOtpChallenge] = useState(null);
+  const [otpCode, setOtpCode] = useState('');
+
+  useEffect(() => {
+    if (!otpChallenge) return undefined;
+    const id = setInterval(() => {
+      setOtpChallenge((prev) => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          expLeft: Math.max(0, prev.expLeft - 1),
+          resendLeft: Math.max(0, prev.resendLeft - 1),
+        };
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, [Boolean(otpChallenge)]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -61,8 +81,61 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
     setLoading(true);
     try {
       const hashedInput = await hashPassword(cleanDni, cleanPass);
+      const dev = await getDeviceFingerprint();
 
-      // 1. Intentar autenticación segura del lado del servidor (RPC SECURITY DEFINER)
+      // 1. Intentar autenticación segura vía Edge Function auth-otp (sesión 15m + dispositivo confiable + OTP)
+      const otpRes = await callAuthOtp({
+        action: 'login_init',
+        dni: cleanDni,
+        correo: cleanCorreo,
+        password_hash: hashedInput,
+        device_hash: dev.deviceHash,
+        device_label: dev.deviceLabel,
+        plataforma: dev.plataforma,
+      });
+
+      if (!otpRes._missingFunction) {
+        if (otpRes.error_conexion) {
+          setError(otpRes.error_conexion);
+          return;
+        }
+        if (otpRes.ok && otpRes.requires_otp && otpRes.challenge_id) {
+          resetLoginRateLimit();
+          setOtpCode('');
+          setOtpChallenge({
+            challengeId: otpRes.challenge_id,
+            maskedEmail: otpRes.masked_email || cleanCorreo,
+            proposito: 'new_device',
+            expLeft: Number(otpRes.expires_in_sec || 600),
+            resendLeft: Number(otpRes.resend_cooldown_sec || 60),
+            retryPayload: {
+              action: 'login_init',
+              dni: cleanDni,
+              correo: cleanCorreo,
+              password_hash: hashedInput,
+              device_hash: dev.deviceHash,
+              device_label: dev.deviceLabel,
+              plataforma: dev.plataforma,
+            },
+          });
+          return;
+        }
+        if (otpRes.ok && otpRes.session_token && otpRes.user) {
+          resetLoginRateLimit();
+          saveSessionToken(otpRes.session_token, dev.deviceHash);
+          onAuthenticated(otpRes.user);
+          return;
+        }
+        const lock = recordFailedLogin(cleanDni, cleanCorreo);
+        setError(
+          lock.locked
+            ? `⏳ Cuenta protegida contra fuerza bruta. Espere ${lock.waitSeconds} s.`
+            : otpRes.error || 'Credenciales incorrectas o cuenta inexistente.'
+        );
+        return;
+      }
+
+      // 2. Respaldo RPC previo mientras se despliega la Edge Function auth-otp
       const { data: rpcData, error: rpcErr } = await supabase.rpc('autenticar_usuario', {
         p_dni: cleanDni,
         p_correo: cleanCorreo,
@@ -167,8 +240,51 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
     setLoading(true);
     try {
       const hashedPass = await hashPassword(cleanDni, cleanPass);
+      const dev = await getDeviceFingerprint();
 
-      // 1. Intentar registro atómico del lado del servidor (RPC SECURITY DEFINER)
+      // 1. Intentar registro protegido con verificación OTP al correo (Edge Function auth-otp)
+      const otpReg = await callAuthOtp({
+        action: 'register_init',
+        dni: cleanDni,
+        nickname: cleanNick,
+        correo: cleanCorreo,
+        password_hash: hashedPass,
+        device_hash: dev.deviceHash,
+        device_label: dev.deviceLabel,
+        plataforma: dev.plataforma,
+      });
+
+      if (!otpReg._missingFunction) {
+        if (otpReg.error_conexion) {
+          setError(otpReg.error_conexion);
+          return;
+        }
+        if (otpReg.ok && otpReg.challenge_id) {
+          setOtpCode('');
+          setOtpChallenge({
+            challengeId: otpReg.challenge_id,
+            maskedEmail: otpReg.masked_email || cleanCorreo,
+            proposito: 'register',
+            expLeft: Number(otpReg.expires_in_sec || 600),
+            resendLeft: Number(otpReg.resend_cooldown_sec || 60),
+            retryPayload: {
+              action: 'register_init',
+              dni: cleanDni,
+              nickname: cleanNick,
+              correo: cleanCorreo,
+              password_hash: hashedPass,
+              device_hash: dev.deviceHash,
+              device_label: dev.deviceLabel,
+              plataforma: dev.plataforma,
+            },
+          });
+          return;
+        }
+        setError(otpReg.error || 'No se pudo iniciar la verificación de registro.');
+        return;
+      }
+
+      // 2. Respaldo RPC previo mientras se despliega auth-otp
       const { data: rpcReg, error: rpcRegErr } = await supabase.rpc('registrar_usuario_seguro', {
         p_dni: cleanDni,
         p_nickname: cleanNick,
@@ -230,6 +346,167 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
       setLoading(false);
     }
   };
+
+  const handleVerifyOtp = async (e) => {
+    e.preventDefault();
+    if (!otpChallenge) return;
+    setError('');
+    setSuccess('');
+    const cleanCode = otpCode.trim();
+    if (!/^\d{6}$/.test(cleanCode)) {
+      setError('Ingrese exactamente 6 dígitos numéricos.');
+      return;
+    }
+    setLoading(true);
+    try {
+      const dev = await getDeviceFingerprint();
+      const action = otpChallenge.proposito === 'register' ? 'register_verify' : 'login_verify_otp';
+      const res = await callAuthOtp({
+        action,
+        challenge_id: otpChallenge.challengeId,
+        code: cleanCode,
+        device_hash: dev.deviceHash,
+        device_label: dev.deviceLabel,
+        plataforma: dev.plataforma,
+      });
+      if (res.ok && res.session_token && res.user) {
+        saveSessionToken(res.session_token, dev.deviceHash);
+        setOtpChallenge(null);
+        onAuthenticated(res.user);
+        return;
+      }
+      setError(res.error || res.error_conexion || 'Código incorrecto o expirado.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    if (!otpChallenge || otpChallenge.resendLeft > 0 || loading) return;
+    setError('');
+    setSuccess('');
+    setLoading(true);
+    try {
+      const res = await callAuthOtp(otpChallenge.retryPayload);
+      if (res.ok && res.challenge_id) {
+        setOtpChallenge((prev) =>
+          prev
+            ? {
+                ...prev,
+                challengeId: res.challenge_id,
+                expLeft: Number(res.expires_in_sec || 600),
+                resendLeft: Number(res.resend_cooldown_sec || 60),
+              }
+            : null
+        );
+        setSuccess(`Nuevo código enviado a ${otpChallenge.maskedEmail}.`);
+      } else {
+        setError(res.error || res.error_conexion || 'No se pudo reenviar el código.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (otpChallenge) {
+    const mm = String(Math.floor(otpChallenge.expLeft / 60)).padStart(2, '0');
+    const ss = String(otpChallenge.expLeft % 60).padStart(2, '0');
+    return (
+      <div className="min-h-screen w-full bg-[#090c12] text-slate-100 flex flex-col items-center justify-center p-4 overflow-y-auto">
+        <div className="view-enter w-full max-w-md instrument-card rounded-2xl shadow-2xl overflow-hidden">
+          <div className="bg-[#101521] p-5 border-b border-slate-800/80">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center">
+                <KeyRound className="w-4 h-4 text-emerald-400" />
+              </div>
+              <span className="text-xs font-semibold tracking-wider text-cyan-400 uppercase">
+                Verificación de Seguridad
+              </span>
+            </div>
+            <h1 className="text-lg font-semibold text-white">
+              {otpChallenge.proposito === 'register'
+                ? 'Confirma tu correo de registro'
+                : 'Nuevo dispositivo detectado'}
+            </h1>
+            <p className="text-xs text-slate-400 mt-1">
+              Enviamos un código de 6 dígitos a <strong className="text-cyan-300">{otpChallenge.maskedEmail}</strong>.
+            </p>
+          </div>
+
+          <form onSubmit={handleVerifyOtp} className="p-5 space-y-4">
+            <div>
+              <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+                Código de 6 dígitos
+              </label>
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                value={otpCode}
+                onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="000000"
+                autoFocus
+                className="w-full bg-[#0f172a] border border-slate-700 focus:border-emerald-400 rounded-xl px-4 py-3 text-center font-mono text-2xl tracking-[0.45em] text-white outline-none transition-colors"
+              />
+              <p className="text-[11px] text-slate-400 mt-1.5 font-mono">
+                {otpChallenge.expLeft > 0
+                  ? `Expira en ${mm}:${ss} · Máximo 5 intentos`
+                  : 'Código expirado. Solicite un reenvío.'}
+              </p>
+            </div>
+
+            {error && (
+              <div className="flex items-start gap-2 text-xs text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-xl p-3">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            {success && (
+              <div className="flex items-start gap-2 text-xs text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-3">
+                <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{success}</span>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading || otpCode.length !== 6}
+              className="w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-[#03160f] font-semibold text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+            >
+              <ShieldCheck className="w-4 h-4" />
+              {loading ? 'Verificando código…' : 'Verificar y Entrar (Sesión 15 min)'}
+            </button>
+
+            <div className="flex items-center justify-between gap-2 pt-1">
+              <button
+                type="button"
+                disabled={loading || otpChallenge.resendLeft > 0}
+                onClick={handleResendOtp}
+                className="text-xs font-medium text-cyan-300 hover:text-cyan-200 disabled:text-slate-500 inline-flex items-center gap-1"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                {otpChallenge.resendLeft > 0
+                  ? `Reenviar (${otpChallenge.resendLeft} s)`
+                  : 'Reenviar código'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setOtpChallenge(null);
+                  setError('');
+                  setSuccess('');
+                }}
+                className="text-xs text-slate-400 hover:text-slate-200"
+              >
+                ← Cancelar
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen w-full bg-[#090c12] text-slate-100 flex flex-col items-center justify-center p-4 overflow-y-auto">

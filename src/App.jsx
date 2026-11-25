@@ -19,6 +19,9 @@ import {
   installBrowserConsoleHoneypot,
   isHoneyTicket,
   triggerHoneytokenAlert,
+  loadSessionToken,
+  clearSessionToken,
+  callAuthOtp,
 } from './utils/security';
 import {
   RotateCcw, Maximize2, Minimize2, EyeOff, Eye, FileDown, Laptop, Monitor,
@@ -225,7 +228,54 @@ export default function App() {
   );
 
   const [authUser, setAuthUser] = useState(null);
+  const [restoringSession, setRestoringSession] = useState(() => Boolean(loadSessionToken()));
   const [guestUnlocked, setGuestUnlocked] = useState(!isNativeApp || Boolean(initialTicketParam));
+
+  useEffect(() => {
+    let active = true;
+    const saved = loadSessionToken();
+    if (!saved) {
+      setRestoringSession(false);
+      return undefined;
+    }
+    callAuthOtp({
+      action: 'session_validate',
+      session_token: saved.token,
+      device_hash: saved.deviceHash,
+    })
+      .then((res) => {
+        if (!active) return;
+        if (res?.ok && res?.user) {
+          setAuthUser(res.user);
+        } else {
+          clearSessionToken();
+        }
+      })
+      .catch(() => {
+        if (active) clearSessionToken();
+      })
+      .finally(() => {
+        if (active) setRestoringSession(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleLogout = useCallback(() => {
+    const saved = loadSessionToken();
+    clearSessionToken();
+    setAuthUser(null);
+    setGuestUnlocked(false);
+    setTabHistory([]);
+    if (saved) {
+      callAuthOtp({
+        action: 'session_logout',
+        session_token: saved.token,
+        device_hash: saved.deviceHash,
+      }).catch(() => {});
+    }
+  }, []);
   const [activeTab, setActiveTab] = useState(isNativeApp && !initialTicketParam ? 'scanner' : '3d');
   const [tabHistory, setTabHistory] = useState([]);
   const [mobileDeviceInfo, setMobileDeviceInfo] = useState(null);
@@ -481,6 +531,15 @@ export default function App() {
     }
   }, [mobileDeviceInfo, telemetry, handleOpenPhone3D, navigateToTab]);
 
+  if (restoringSession && !guestUnlocked && !authUser) {
+    return (
+      <div className="min-h-screen w-full bg-[#090c12] text-slate-100 flex flex-col items-center justify-center p-4">
+        <div className="w-8 h-8 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin mb-3" />
+        <p className="text-xs font-medium text-slate-300">Verificando sesión segura (15 min)…</p>
+      </div>
+    );
+  }
+
   if (!guestUnlocked && !authUser) {
     return (
       <MobileAuthView
@@ -528,11 +587,7 @@ export default function App() {
               icon={LogOut}
               label="Salir"
               active={false}
-              onClick={() => {
-                setAuthUser(null);
-                setGuestUnlocked(false);
-                setTabHistory([]);
-              }}
+              onClick={handleLogout}
             />
           )}
         </aside>
@@ -736,11 +791,7 @@ export default function App() {
               icon={LogOut}
               label="Salir"
               active={false}
-              onClick={() => {
-                setAuthUser(null);
-                setGuestUnlocked(false);
-                setTabHistory([]);
-              }}
+              onClick={handleLogout}
             />
           )}
         </nav>

@@ -2,7 +2,15 @@
  * security.js — Criptografía WebCrypto, Rate-Limiting y Motor de Honeytokens (Web + Android APK)
  */
 
+import { Capacitor } from '@capacitor/core';
+import { Device } from '@capacitor/device';
 import { supabase } from '../supabaseClient.js';
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://pvrfnvrxaxulcxacdino.supabase.co';
+const SUPABASE_ANON_KEY =
+  import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_G7D4dhh3Q2LWzgRnzRRa9A_4ngZ5FiW';
+const DEVICE_ID_STORAGE_KEY = '__indiserv_dev_id_v1';
+const SESSION_STORAGE_KEY = '__indiserv_session_v1';
 
 const HASH_PREFIX = 'indiserv_v1$';
 const HASH_SALT_NAMESPACE = 'INDISERV_SALT_2026';
@@ -203,5 +211,130 @@ export function installBrowserConsoleHoneypot() {
     };
   } catch {
     // Ignore in strict environments
+  }
+}
+
+async function sha256Hex(raw) {
+  const enc = new TextEncoder().encode(raw);
+  const digest = await crypto.subtle.digest('SHA-256', enc);
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+export async function getDeviceFingerprint() {
+  let isNative = false;
+  try {
+    isNative = Capacitor.isNativePlatform();
+  } catch {
+    isNative = false;
+  }
+
+  let stableId = '';
+  let deviceLabel = 'Web · Navegador';
+  const plataforma = isNative ? 'android' : 'web';
+
+  if (isNative) {
+    try {
+      const [idRes, infoRes] = await Promise.all([Device.getId(), Device.getInfo()]);
+      stableId = String(idRes?.identifier || '').trim();
+      const model = infoRes?.model || infoRes?.name || 'Android';
+      const manuf = infoRes?.manufacturer || '';
+      deviceLabel = `Android · ${`${manuf} ${model}`.trim().slice(0, 36)}`;
+    } catch {
+      // Fallback a UUID local persistente
+    }
+  }
+
+  if (!stableId) {
+    try {
+      stableId = localStorage.getItem(DEVICE_ID_STORAGE_KEY) || '';
+      if (!stableId) {
+        stableId =
+          typeof crypto !== 'undefined' && crypto.randomUUID
+            ? crypto.randomUUID()
+            : `web-${randomHex(8)}`;
+        localStorage.setItem(DEVICE_ID_STORAGE_KEY, stableId);
+      }
+    } catch {
+      stableId = `ephemeral-${randomHex(8)}`;
+    }
+    if (!isNative && typeof navigator !== 'undefined') {
+      const ua = navigator.userAgent || '';
+      const browser = ua.includes('Edg')
+        ? 'Edge'
+        : ua.includes('Chrome')
+        ? 'Chrome'
+        : ua.includes('Firefox')
+        ? 'Firefox'
+        : ua.includes('Safari')
+        ? 'Safari'
+        : 'Web';
+      deviceLabel = `Web · ${browser}`;
+    }
+  }
+
+  const deviceHash = await sha256Hex(`INDISERV_DEV_V1::${plataforma}::${stableId}`);
+  return { deviceHash, deviceLabel, plataforma };
+}
+
+export function saveSessionToken(token, deviceHash) {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(
+      SESSION_STORAGE_KEY,
+      JSON.stringify({ token: String(token), deviceHash: String(deviceHash) })
+    );
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+export function loadSessionToken() {
+  try {
+    if (typeof localStorage === 'undefined') return null;
+    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed?.token && parsed?.deviceHash) {
+      return { token: String(parsed.token), deviceHash: String(parsed.deviceHash) };
+    }
+  } catch {
+    // Ignore malformed JSON
+  }
+  return null;
+}
+
+export function clearSessionToken() {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+    }
+  } catch {
+    // Ignore
+  }
+}
+
+export async function callAuthOtp(payload) {
+  const url = `${SUPABASE_URL.replace(/\/$/, '')}/functions/v1/auth-otp`;
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+      body: JSON.stringify(payload),
+    });
+    const parsed = await resp.json().catch(() => ({ ok: false, error: `HTTP ${resp.status}` }));
+    return {
+      ...parsed,
+      _httpStatus: resp.status,
+      _missingFunction: resp.status === 404,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error_conexion: `Error de conexión: ${err?.message || 'Verifique internet'}`,
+    };
   }
 }
