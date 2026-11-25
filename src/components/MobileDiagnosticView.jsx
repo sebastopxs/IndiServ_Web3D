@@ -265,10 +265,10 @@ export default function MobileDiagnosticView({ deviceInfo, user, onOpenPhone3D }
     : 0;
 
   return (
-    <div className="h-full w-full overflow-y-auto bg-[#090c12] text-slate-100 p-4 pb-24">
-      <div className="max-w-3xl mx-auto space-y-4">
+    <div className="h-full w-full overflow-y-auto bg-[#090c12] text-slate-100 p-4 md:p-5 lg:p-6 pb-28 md:pb-24">
+      <div className="max-w-3xl md:max-w-none xl:max-w-[1440px] mx-auto space-y-4">
         {/* Encabezado */}
-        <div className="instrument-card rounded-2xl p-4 space-y-3">
+        <div className="instrument-card rounded-2xl p-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center shrink-0">
@@ -296,7 +296,7 @@ export default function MobileDiagnosticView({ deviceInfo, user, onOpenPhone3D }
 
           {/* Selector de 3 Modos */}
           {!activeReport && (
-            <div className="grid grid-cols-3 gap-1.5 bg-[#101521] p-1 rounded-xl border border-slate-800/90">
+            <div className="grid grid-cols-3 gap-1.5 bg-[#101521] p-1 rounded-xl border border-slate-800/90 lg:min-w-[380px]">
               {[
                 { id: 'tree', label: 'Árbol Guiado', icon: GitBranch },
                 { id: 'multi', label: `Multisíntoma${multiSelectedCodes.length ? ` (${multiSelectedCodes.length})` : ''}`, icon: Layers },
@@ -334,7 +334,7 @@ export default function MobileDiagnosticView({ deviceInfo, user, onOpenPhone3D }
               <Sparkles className="w-4 h-4 shrink-0" />
               Auto-Triaje en Vivo: {liveAlerts.length} alerta{liveAlerts.length === 1 ? '' : 's'} detectada{liveAlerts.length === 1 ? '' : 's'} en tus sensores
             </div>
-            <div className="space-y-2">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
               {liveAlerts.map((al, i) => (
                 <div
                   key={i}
@@ -499,7 +499,7 @@ export default function MobileDiagnosticView({ deviceInfo, user, onOpenPhone3D }
             <p className="text-[11px] text-slate-400 px-1">
               {searchResults.length} caso{searchResults.length === 1 ? '' : 's'} clínico{searchResults.length === 1 ? '' : 's'} encontrado{searchResults.length === 1 ? '' : 's'}
             </p>
-            <div className="space-y-2">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
               {searchResults.map((c) => (
                 <button
                   key={c.code}
@@ -543,7 +543,7 @@ export default function MobileDiagnosticView({ deviceInfo, user, onOpenPhone3D }
               </button>
             </div>
 
-            <div className="space-y-3">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
               {DIAGNOSTIC_TREE.map((branch) => {
                 const BIcon = branch.icon;
                 return (
@@ -687,7 +687,7 @@ export default function MobileDiagnosticView({ deviceInfo, user, onOpenPhone3D }
           </div>
         ) : (
           /* VISTA 5: GRILLA DE LAS 8 RAMAS ESPECIALIZADAS */
-          <div className="view-enter grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="view-enter grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             {DIAGNOSTIC_TREE.map((branch) => {
               const BIcon = branch.icon;
               return (

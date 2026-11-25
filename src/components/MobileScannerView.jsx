@@ -443,11 +443,11 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
   };
 
   return (
-    <div className="h-full w-full overflow-y-auto bg-[#0b0f19] text-zinc-100 p-4 pb-24">
-      <div className="max-w-2xl mx-auto space-y-3.5">
+    <div className="h-full w-full overflow-y-auto bg-[#0b0f19] text-zinc-100 p-4 md:p-5 lg:p-6 pb-28 md:pb-24">
+      <div className="max-w-2xl md:max-w-none xl:max-w-[1440px] mx-auto space-y-4">
 
-        <div className="flex items-center justify-between bg-[#131c2e] border border-slate-800 rounded-2xl p-4">
-          <div className="min-w-0">
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-[#131c2e] border border-slate-800 rounded-2xl p-4">
+          <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="text-[10px] uppercase tracking-widest text-cyan-400 font-semibold">
                 {info?.isNative ? 'Telemetría Nativa Android' : 'Escáner de Dispositivo'}
@@ -463,7 +463,7 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
                 </span>
               )}
             </div>
-            <h2 className="text-base font-bold text-white truncate mt-0.5">
+            <h2 className="text-base lg:text-lg font-bold text-white truncate mt-0.5">
               {info ? info.commercialName || info.displayName : 'Analizando hardware…'}
             </h2>
             {info && (
@@ -476,245 +476,283 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
               </p>
             )}
           </div>
-          <button
-            onClick={scanDevice}
-            disabled={scanning}
-            className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-400 transition-colors shrink-0 ml-2"
-            title="Reescanear"
-          >
-            <RefreshCw className={`w-4 h-4 ${scanning ? 'animate-spin' : ''}`} />
-          </button>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {info && (
+              <div className="hidden lg:flex items-center gap-2">
+                <button
+                  onClick={() => onOpenPhone3D?.({ deviceInfo: info })}
+                  className="py-2 px-3.5 rounded-xl bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-all shadow-lg shadow-emerald-950/40"
+                >
+                  <Box className="w-3.5 h-3.5" /> {info.isTablet ? 'Tablet 3D' : 'Teléfono 3D'}
+                </button>
+                <button
+                  onClick={() => onOpenDiagnostic?.()}
+                  className="py-2 px-3 rounded-xl bg-[#0b0f19] hover:bg-slate-800 border border-emerald-500/35 text-emerald-300 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                >
+                  <Stethoscope className="w-3.5 h-3.5" /> Diagnóstico
+                </button>
+                <button
+                  onClick={() => onOpenMaintenance?.()}
+                  className="py-2 px-3 rounded-xl bg-[#0b0f19] hover:bg-slate-800 border border-cyan-500/35 text-cyan-300 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                >
+                  <Snowflake className="w-3.5 h-3.5" /> Enfriamiento
+                </button>
+              </div>
+            )}
+            <button
+              onClick={scanDevice}
+              disabled={scanning}
+              className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-400 transition-colors shrink-0"
+              title="Reescanear"
+            >
+              <RefreshCw className={`w-4 h-4 ${scanning ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
         </div>
 
-        {info && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+          {/* Columna izquierda (7/12 en tablet horizontal): SoC, RAM, Almacenamiento, Red y GPU */}
+          {info && (
+            <div className="lg:col-span-7 space-y-3.5">
 
-            <div className="sm:col-span-2 bg-[#131c2e] border border-slate-800 rounded-xl p-4 space-y-2.5">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 text-cyan-400 text-[10px] font-semibold uppercase">
-                  <Cpu className="w-3.5 h-3.5" /> Procesador (SoC) · Perfil CPU-Z
-                </div>
-                <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded">
-                  {info.cpuCores} Núcleos{info.cpuMaxFreqMhz ? ` @ ${(info.cpuMaxFreqMhz / 1000).toFixed(2)} GHz` : ''}
-                </span>
-              </div>
-
-              <div>
-                <p className="text-base font-bold text-white leading-snug">{info.commercialSoc || info.cpuName}</p>
-                <p className="text-[11px] text-slate-400 font-mono mt-0.5">
-                  Código fábrica: <strong className="text-slate-200">{info.socFactoryCode || info.socCodename || 'N/D'}</strong>
-                  {info.hardwarePlatform && info.hardwarePlatform !== info.socFactoryCode ? ` (${info.hardwarePlatform})` : ''}
-                  {info.cpuGovernor ? ` · Governor: ${info.cpuGovernor}` : ''}
-                </p>
-              </div>
-
-              {Array.isArray(info.cpuClusters) && info.cpuClusters.length > 0 && (
-                <div className="bg-[#0b0f19] border border-slate-800/90 rounded-xl p-2.5 space-y-1.5">
-                  <span className="text-[9px] uppercase tracking-wider text-slate-500 font-semibold block">
-                    Topología de Núcleos (Clústeres Reales)
+              <div className="bg-[#131c2e] border border-slate-800 rounded-xl p-4 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-cyan-400 text-[10px] font-semibold uppercase">
+                    <Cpu className="w-3.5 h-3.5" /> Procesador (SoC) · Perfil CPU-Z
+                  </div>
+                  <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded">
+                    {info.cpuCores} Núcleos{info.cpuMaxFreqMhz ? ` @ ${(info.cpuMaxFreqMhz / 1000).toFixed(2)} GHz` : ''}
                   </span>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                    {info.cpuClusters.map((cl, idx) => (
-                      <div
-                        key={idx}
-                        className="flex items-center justify-between gap-2 bg-slate-900/70 border border-slate-800 rounded-lg px-2.5 py-1.5 text-[11px] font-mono"
+                </div>
+
+                <div>
+                  <p className="text-base font-bold text-white leading-snug">{info.commercialSoc || info.cpuName}</p>
+                  <p className="text-[11px] text-slate-400 font-mono mt-0.5">
+                    Código fábrica: <strong className="text-slate-200">{info.socFactoryCode || info.socCodename || 'N/D'}</strong>
+                    {info.hardwarePlatform && info.hardwarePlatform !== info.socFactoryCode ? ` (${info.hardwarePlatform})` : ''}
+                    {info.cpuGovernor ? ` · Governor: ${info.cpuGovernor}` : ''}
+                  </p>
+                </div>
+
+                {Array.isArray(info.cpuClusters) && info.cpuClusters.length > 0 && (
+                  <div className="bg-[#0b0f19] border border-slate-800/90 rounded-xl p-2.5 space-y-1.5">
+                    <span className="text-[9px] uppercase tracking-wider text-slate-500 font-semibold block">
+                      Topología de Núcleos (Clústeres Reales)
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                      {info.cpuClusters.map((cl, idx) => (
+                        <div
+                          key={idx}
+                          className="flex items-center justify-between gap-2 bg-slate-900/70 border border-slate-800 rounded-lg px-2.5 py-1.5 text-[11px] font-mono"
+                        >
+                          <span className="text-cyan-300 font-semibold truncate">
+                            {cl.cores}× {cl.archName}
+                          </span>
+                          <span className="text-slate-300 shrink-0">
+                            {cl.maxFreqMhz > 0
+                              ? cl.minFreqMhz > 0
+                                ? `${cl.minFreqMhz}–${cl.maxFreqMhz} MHz`
+                                : `@ ${(cl.maxFreqMhz / 1000).toFixed(2)} GHz`
+                              : 'ARM64'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-400 font-mono">
+                  <span>ABI: <strong className="text-slate-200">{info.cpuArch}</strong></span>
+                  {info.supportedAbis && <span>Soportadas: {info.supportedAbis}</span>}
+                  {info.deviceCode && <span>Codename: {info.deviceCode}</span>}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div className="bg-[#131c2e] border border-slate-800 rounded-xl p-3.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-emerald-400 text-[10px] font-semibold uppercase">
+                      <MemoryStick className="w-3.5 h-3.5" /> Memoria RAM
+                    </div>
+                    {info.ramUsedPct != null && (
+                      <span className="text-[10px] font-mono text-slate-300">{info.ramUsedPct}% uso</span>
+                    )}
+                  </div>
+                  <p className="text-lg font-bold text-white mt-1">
+                    {info.ramTotalGb != null ? `${info.ramTotalGb} GB Total` : 'N/D'}
+                  </p>
+                  <p className="text-[11px] text-slate-400">
+                    {info.ramAvailGb != null
+                      ? `Libre: ${info.ramAvailGb} GB · Usada: ${info.ramUsedGb} GB`
+                      : 'RAM aproximada por WebView'}
+                  </p>
+                  {info.ramUsedPct != null && <UsageBar pct={info.ramUsedPct} />}
+                </div>
+
+                <div className="bg-[#131c2e] border border-slate-800 rounded-xl p-3.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-amber-400 text-[10px] font-semibold uppercase">
+                      <HardDrive className="w-3.5 h-3.5" /> Almacenamiento Interno
+                    </div>
+                    {info.storageUsedPct != null && (
+                      <span className="text-[10px] font-mono text-slate-300">{info.storageUsedPct}% uso</span>
+                    )}
+                  </div>
+                  <p className="text-lg font-bold text-white mt-1">
+                    {info.storageTotalGb != null ? `${info.storageTotalGb} GB` : 'Solo en APK nativo'}
+                  </p>
+                  <p className="text-[11px] text-slate-400">
+                    {info.storageAvailGb != null
+                      ? `Libre: ${info.storageAvailGb} GB · Usado: ${info.storageUsedGb} GB`
+                      : 'Instale el APK para lectura StatFs'}
+                  </p>
+                  {info.storageUsedPct != null && <UsageBar pct={info.storageUsedPct} color="from-amber-500 to-emerald-400" />}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div className="bg-[#131c2e] border border-slate-800 rounded-xl p-3.5">
+                  <div className="flex items-center gap-2 text-violet-400 text-[10px] font-semibold uppercase">
+                    <Wifi className="w-3.5 h-3.5" /> Red &amp; Seguridad SO
+                  </div>
+                  <p className="text-sm font-bold text-white mt-1">
+                    {info.connected ? `En Línea (${info.netType})` : 'Sin Conexión'}
+                  </p>
+                  <p className="text-[11px] text-slate-400 truncate">
+                    Parche: {info.securityPatch} · {info.screenRes}
+                  </p>
+                </div>
+
+                <div className="bg-[#131c2e] border border-slate-800 rounded-xl p-3.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-blue-400 text-[10px] font-semibold uppercase">
+                      <MonitorPlay className="w-3.5 h-3.5" /> Acelerador Gráfico (GPU)
+                    </div>
+                    {info.kernelVersion && (
+                      <span className="text-[10px] font-mono text-slate-500 truncate max-w-[140px]">
+                        Kernel {info.kernelVersion}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs font-mono text-slate-200 mt-1 break-words">{info.gpu}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Columna derecha (5/12 en tablet horizontal): Batería, Auditoría IA y Stress Test */}
+          <div className="lg:col-span-5 space-y-3.5">
+            {info && (
+              <>
+                <div className="bg-[#131c2e] border border-slate-800 rounded-xl p-4 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-yellow-400 text-[10px] font-semibold uppercase">
+                      <BatteryCharging className="w-3.5 h-3.5" /> Estado y Salud de Batería
+                    </div>
+                    <span
+                      className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                        ['Óptima', 'Estándar'].includes(info.batteryHealth)
+                          ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                          : info.batteryHealth === 'Fría'
+                          ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
+                          : 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                      }`}
+                    >
+                      Salud: {info.batteryHealth}
+                    </span>
+                  </div>
+
+                  <div className="flex items-baseline justify-between gap-3">
+                    <div className="flex items-baseline gap-2.5">
+                      <p className="text-2xl font-bold text-white">
+                        {info.batteryPct != null ? `${info.batteryPct}%` : 'N/D'}
+                      </p>
+                      <span className="text-xs text-slate-300 font-medium">
+                        {info.batteryStatusText} · {info.batteryPlugged}
+                      </span>
+                    </div>
+                    {info.batteryTempC != null && (
+                      <span
+                        className={`text-xs font-mono inline-flex items-center gap-1 px-2 py-0.5 rounded ${
+                          info.batteryTempC >= 40
+                            ? 'bg-rose-500/15 text-rose-300'
+                            : 'bg-amber-500/10 text-amber-300'
+                        }`}
                       >
-                        <span className="text-cyan-300 font-semibold truncate">
-                          {cl.cores}× {cl.archName}
-                        </span>
-                        <span className="text-slate-300 shrink-0">
-                          {cl.maxFreqMhz > 0
-                            ? cl.minFreqMhz > 0
-                              ? `${cl.minFreqMhz}–${cl.maxFreqMhz} MHz`
-                              : `@ ${(cl.maxFreqMhz / 1000).toFixed(2)} GHz`
-                            : 'ARM64'}
-                        </span>
-                      </div>
-                    ))}
+                        <Thermometer className="w-3.5 h-3.5" /> {info.batteryTempC}°C
+                      </span>
+                    )}
+                  </div>
+
+                  {info.batteryPct != null && (
+                    <div className="w-full h-2 bg-slate-900 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full transition-all duration-500 bg-gradient-to-r ${
+                          info.batteryPct <= 20
+                            ? 'from-rose-500 to-red-400'
+                            : info.batteryPct <= 45
+                            ? 'from-amber-500 to-yellow-400'
+                            : 'from-emerald-500 to-cyan-400'
+                        }`}
+                        style={{ width: `${Math.max(0, Math.min(100, info.batteryPct))}%` }}
+                      />
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-2 xl:grid-cols-4 gap-2 pt-1 text-[11px] font-mono">
+                    <div className="bg-[#0b0f19] border border-slate-800/80 rounded-lg px-2.5 py-1.5">
+                      <span className="text-[9px] text-slate-500 block uppercase">Voltaje</span>
+                      <span className="text-slate-200 font-semibold">
+                        {info.batteryVoltageMv ? `${(info.batteryVoltageMv / 1000).toFixed(2)} V` : 'N/D'}
+                      </span>
+                    </div>
+                    <div className="bg-[#0b0f19] border border-slate-800/80 rounded-lg px-2.5 py-1.5">
+                      <span className="text-[9px] text-slate-500 block uppercase">Tecnología</span>
+                      <span className="text-slate-200 font-semibold">{info.batteryTechnology || 'Li-ion'}</span>
+                    </div>
+                    <div className="bg-[#0b0f19] border border-slate-800/80 rounded-lg px-2.5 py-1.5">
+                      <span className="text-[9px] text-slate-500 block uppercase">Corriente</span>
+                      <span className="text-slate-200 font-semibold inline-flex items-center gap-0.5">
+                        <Zap className="w-3 h-3 text-amber-400" />
+                        {info.batteryCurrentMa != null ? `${Math.abs(info.batteryCurrentMa)} mA` : 'N/D'}
+                      </span>
+                    </div>
+                    <div className="bg-[#0b0f19] border border-slate-800/80 rounded-lg px-2.5 py-1.5">
+                      <span className="text-[9px] text-slate-500 block uppercase">Carga Actual</span>
+                      <span className="text-slate-200 font-semibold">
+                        {info.batteryChargeCounterMah != null ? `${info.batteryChargeCounterMah} mAh` : 'N/D'}
+                      </span>
+                    </div>
                   </div>
                 </div>
-              )}
 
-              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-400 font-mono">
-                <span>ABI: <strong className="text-slate-200">{info.cpuArch}</strong></span>
-                {info.supportedAbis && <span>Soportadas: {info.supportedAbis}</span>}
-                {info.deviceCode && <span>Codename: {info.deviceCode}</span>}
-              </div>
-            </div>
-
-            <div className="bg-[#131c2e] border border-slate-800 rounded-xl p-3.5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-emerald-400 text-[10px] font-semibold uppercase">
-                  <MemoryStick className="w-3.5 h-3.5" /> Memoria RAM
-                </div>
-                {info.ramUsedPct != null && (
-                  <span className="text-[10px] font-mono text-slate-300">{info.ramUsedPct}% uso</span>
-                )}
-              </div>
-              <p className="text-lg font-bold text-white mt-1">
-                {info.ramTotalGb != null ? `${info.ramTotalGb} GB Total` : 'N/D'}
-              </p>
-              <p className="text-[11px] text-slate-400">
-                {info.ramAvailGb != null
-                  ? `Libre: ${info.ramAvailGb} GB · Usada: ${info.ramUsedGb} GB`
-                  : 'RAM aproximada por WebView'}
-              </p>
-              {info.ramUsedPct != null && <UsageBar pct={info.ramUsedPct} />}
-            </div>
-
-            <div className="bg-[#131c2e] border border-slate-800 rounded-xl p-3.5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-amber-400 text-[10px] font-semibold uppercase">
-                  <HardDrive className="w-3.5 h-3.5" /> Almacenamiento Interno
-                </div>
-                {info.storageUsedPct != null && (
-                  <span className="text-[10px] font-mono text-slate-300">{info.storageUsedPct}% uso</span>
-                )}
-              </div>
-              <p className="text-lg font-bold text-white mt-1">
-                {info.storageTotalGb != null ? `${info.storageTotalGb} GB` : 'Solo en APK nativo'}
-              </p>
-              <p className="text-[11px] text-slate-400">
-                {info.storageAvailGb != null
-                  ? `Libre: ${info.storageAvailGb} GB · Usado: ${info.storageUsedGb} GB`
-                  : 'Instale el APK para lectura StatFs'}
-              </p>
-              {info.storageUsedPct != null && <UsageBar pct={info.storageUsedPct} color="from-amber-500 to-emerald-400" />}
-            </div>
-
-            <div className="sm:col-span-2 bg-[#131c2e] border border-slate-800 rounded-xl p-4 space-y-2.5">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 text-yellow-400 text-[10px] font-semibold uppercase">
-                  <BatteryCharging className="w-3.5 h-3.5" /> Estado y Salud de Batería
-                </div>
-                <span
-                  className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
-                    ['Óptima', 'Estándar'].includes(info.batteryHealth)
-                      ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-                      : info.batteryHealth === 'Fría'
-                      ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
-                      : 'bg-rose-500/15 text-rose-300 border-rose-500/30'
-                  }`}
-                >
-                  Salud: {info.batteryHealth}
-                </span>
-              </div>
-
-              <div className="flex items-baseline justify-between gap-3">
-                <div className="flex items-baseline gap-2.5">
-                  <p className="text-2xl font-bold text-white">
-                    {info.batteryPct != null ? `${info.batteryPct}%` : 'N/D'}
-                  </p>
-                  <span className="text-xs text-slate-300 font-medium">
-                    {info.batteryStatusText} · {info.batteryPlugged}
-                  </span>
-                </div>
-                {info.batteryTempC != null && (
-                  <span
-                    className={`text-xs font-mono inline-flex items-center gap-1 px-2 py-0.5 rounded ${
-                      info.batteryTempC >= 40
-                        ? 'bg-rose-500/15 text-rose-300'
-                        : 'bg-amber-500/10 text-amber-300'
-                    }`}
+                {/* Botones rápidos en móvil / vertical (en tablet horizontal van en la cabecera) */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 lg:hidden gap-2">
+                  <button
+                    onClick={() => onOpenPhone3D?.({ deviceInfo: info })}
+                    className="py-2.5 px-3 rounded-xl bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-all shadow-lg shadow-emerald-950/40"
                   >
-                    <Thermometer className="w-3.5 h-3.5" /> {info.batteryTempC}°C
-                  </span>
-                )}
-              </div>
-
-              {info.batteryPct != null && (
-                <div className="w-full h-2 bg-slate-900 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full transition-all duration-500 bg-gradient-to-r ${
-                      info.batteryPct <= 20
-                        ? 'from-rose-500 to-red-400'
-                        : info.batteryPct <= 45
-                        ? 'from-amber-500 to-yellow-400'
-                        : 'from-emerald-500 to-cyan-400'
-                    }`}
-                    style={{ width: `${Math.max(0, Math.min(100, info.batteryPct))}%` }}
-                  />
+                    <Box className="w-4 h-4" /> {info.isTablet ? 'Tablet 3D' : 'Teléfono 3D'}
+                  </button>
+                  <button
+                    onClick={() => onOpenDiagnostic?.()}
+                    className="py-2.5 px-3 rounded-xl bg-[#131c2e] hover:bg-slate-800 border border-emerald-500/35 text-emerald-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    <Stethoscope className="w-4 h-4" /> Diagnóstico
+                  </button>
+                  <button
+                    onClick={() => onOpenMaintenance?.()}
+                    className="py-2.5 px-3 rounded-xl bg-[#131c2e] hover:bg-slate-800 border border-cyan-500/35 text-cyan-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    <Snowflake className="w-4 h-4" /> Enfriamiento
+                  </button>
                 </div>
-              )}
+              </>
+            )}
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-[11px] font-mono">
-                <div className="bg-[#0b0f19] border border-slate-800/80 rounded-lg px-2.5 py-1.5">
-                  <span className="text-[9px] text-slate-500 block uppercase">Voltaje</span>
-                  <span className="text-slate-200 font-semibold">
-                    {info.batteryVoltageMv ? `${(info.batteryVoltageMv / 1000).toFixed(2)} V` : 'N/D'}
-                  </span>
-                </div>
-                <div className="bg-[#0b0f19] border border-slate-800/80 rounded-lg px-2.5 py-1.5">
-                  <span className="text-[9px] text-slate-500 block uppercase">Tecnología</span>
-                  <span className="text-slate-200 font-semibold">{info.batteryTechnology || 'Li-ion'}</span>
-                </div>
-                <div className="bg-[#0b0f19] border border-slate-800/80 rounded-lg px-2.5 py-1.5">
-                  <span className="text-[9px] text-slate-500 block uppercase">Corriente</span>
-                  <span className="text-slate-200 font-semibold inline-flex items-center gap-0.5">
-                    <Zap className="w-3 h-3 text-amber-400" />
-                    {info.batteryCurrentMa != null ? `${Math.abs(info.batteryCurrentMa)} mA` : 'N/D'}
-                  </span>
-                </div>
-                <div className="bg-[#0b0f19] border border-slate-800/80 rounded-lg px-2.5 py-1.5">
-                  <span className="text-[9px] text-slate-500 block uppercase">Carga Actual</span>
-                  <span className="text-slate-200 font-semibold">
-                    {info.batteryChargeCounterMah != null ? `${info.batteryChargeCounterMah} mAh` : 'N/D'}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <button
-                onClick={() => onOpenPhone3D?.({ deviceInfo: info })}
-                className="py-2.5 px-3 rounded-xl bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-all shadow-lg shadow-emerald-950/40"
-              >
-                <Box className="w-4 h-4" /> Teléfono 3D
-              </button>
-              <button
-                onClick={() => onOpenDiagnostic?.()}
-                className="py-2.5 px-3 rounded-xl bg-[#131c2e] hover:bg-slate-800 border border-emerald-500/35 text-emerald-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
-              >
-                <Stethoscope className="w-4 h-4" /> Diagnóstico
-              </button>
-              <button
-                onClick={() => onOpenMaintenance?.()}
-                className="py-2.5 px-3 rounded-xl bg-[#131c2e] hover:bg-slate-800 border border-cyan-500/35 text-cyan-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
-              >
-                <Snowflake className="w-4 h-4" /> Enfriamiento
-              </button>
-            </div>
-
-            <div className="sm:col-span-2 bg-[#131c2e] border border-slate-800 rounded-xl p-3.5">
-              <div className="flex items-center gap-2 text-violet-400 text-[10px] font-semibold uppercase">
-                <Wifi className="w-3.5 h-3.5" /> Red &amp; Seguridad SO
-              </div>
-              <p className="text-sm font-bold text-white mt-1">
-                {info.connected ? `En Línea (${info.netType})` : 'Sin Conexión'}
-              </p>
-              <p className="text-[11px] text-slate-400 truncate">
-                Parche: {info.securityPatch} · {info.screenRes}
-              </p>
-            </div>
-
-            <div className="sm:col-span-2 bg-[#131c2e] border border-slate-800 rounded-xl p-3.5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-blue-400 text-[10px] font-semibold uppercase">
-                  <MonitorPlay className="w-3.5 h-3.5" /> Acelerador Gráfico (GPU)
-                </div>
-                {info.kernelVersion && (
-                  <span className="text-[10px] font-mono text-slate-500 truncate max-w-[180px]">
-                    Kernel {info.kernelVersion}
-                  </span>
-                )}
-              </div>
-              <p className="text-xs font-mono text-slate-200 mt-1 break-words">{info.gpu}</p>
-            </div>
-          </div>
-        )}
-
-        {info && (
-          <div className="bg-[#131c2e] border border-cyan-500/25 rounded-2xl p-4 space-y-3">
+            {info && (
+              <div className="bg-[#131c2e] border border-cyan-500/25 rounded-2xl p-4 space-y-3">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-cyan-400" />
@@ -868,6 +906,8 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
                 <Square className="w-3.5 h-3.5" /> Cancelar Test
               </button>
             )}
+          </div>
+        </div>
           </div>
         </div>
       </div>

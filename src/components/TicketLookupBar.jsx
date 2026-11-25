@@ -303,8 +303,8 @@ export default function TicketLookupBar({ user, onSelectTicket, onRequestLogin }
   };
 
   return (
-    <div className="h-full w-full overflow-y-auto bg-[#090c12] text-slate-100 p-4 pb-24">
-      <div className="max-w-3xl mx-auto space-y-4">
+    <div className="h-full w-full overflow-y-auto bg-[#090c12] text-slate-100 p-4 md:p-5 lg:p-6 pb-28 md:pb-24">
+      <div className="max-w-3xl md:max-w-none xl:max-w-[1440px] mx-auto space-y-4">
         {/* Buscador directo por ID exacto */}
         <div className="instrument-card rounded-2xl p-4 space-y-3">
           <div className="flex items-center justify-between gap-2">
@@ -489,7 +489,7 @@ export default function TicketLookupBar({ user, onSelectTicket, onRequestLogin }
                 ✔ 0 alertas de Honeytoken disparadas. Ningún intruso ha tocado las trampas señuelo.
               </div>
             ) : (
-              <div className="space-y-2">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
                 {honeyAlerts.map((al) => (
                   <div
                     key={al.id_ticket}
@@ -549,7 +549,7 @@ export default function TicketLookupBar({ user, onSelectTicket, onRequestLogin }
                       </span>
                     </div>
                   )}
-                  <div className="space-y-2">{section.items.map(renderTicketCard)}</div>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">{section.items.map(renderTicketCard)}</div>
                 </div>
               ))}
             </div>

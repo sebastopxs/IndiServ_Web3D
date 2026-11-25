@@ -372,8 +372,8 @@ export default function MobileMaintenanceView({ deviceInfo, user }) {
       : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
 
   return (
-    <div className="h-full w-full overflow-y-auto bg-[#0b0f19] text-zinc-100 p-4 pb-24">
-      <div className="max-w-2xl mx-auto space-y-4">
+    <div className="h-full w-full overflow-y-auto bg-[#0b0f19] text-zinc-100 p-4 md:p-5 lg:p-6 pb-28 md:pb-24">
+      <div className="max-w-2xl md:max-w-none xl:max-w-[1440px] mx-auto space-y-4">
 
         <div className="bg-[#131c2e] border border-slate-800 rounded-2xl p-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
@@ -422,7 +422,8 @@ export default function MobileMaintenanceView({ deviceInfo, user }) {
           </div>
         )}
 
-        <div className="bg-[#131c2e] border border-slate-800 rounded-2xl p-4 space-y-3.5">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+        <div className="lg:col-span-6 bg-[#131c2e] border border-slate-800 rounded-2xl p-4 space-y-3.5">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Thermometer className="w-4 h-4 text-cyan-400" />
@@ -550,6 +551,7 @@ export default function MobileMaintenanceView({ deviceInfo, user }) {
           </div>
         </div>
 
+        <div className="lg:col-span-6 space-y-4">
         <div className="bg-[#131c2e] border border-slate-800 rounded-2xl p-4 space-y-3.5">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
@@ -802,6 +804,8 @@ export default function MobileMaintenanceView({ deviceInfo, user }) {
               )}
             </>
           )}
+        </div>
+        </div>
         </div>
       </div>
 
