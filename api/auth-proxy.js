@@ -27,6 +27,9 @@ const ALLOWED_HOSTS = new Set(
     String(process.env.VERCEL_URL || '').trim().toLowerCase(),
     String(process.env.VERCEL_BRANCH_URL || '').trim().toLowerCase(),
     String(process.env.VERCEL_PROJECT_PRODUCTION_URL || '').trim().toLowerCase(),
+    ...String(process.env.ALLOWED_PROXY_HOSTS || '')
+      .split(',')
+      .map((s) => s.trim().toLowerCase()),
   ].filter(Boolean)
 );
 

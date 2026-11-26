@@ -322,12 +322,27 @@ export async function hydrateNativeSession() {
   return null;
 }
 
+const CUSTOM_COOKIE_PROXY_HOSTS = new Set(
+  String(import.meta.env.VITE_COOKIE_PROXY_HOSTS || '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+);
+
 export function isVercelCookieMode() {
   try {
     if (Capacitor.isNativePlatform()) return false;
     if (typeof window === 'undefined') return false;
+    if (String(import.meta.env.VITE_USE_COOKIE_PROXY || '').toLowerCase() === 'false') return false;
     const h = String(window.location?.hostname || '').toLowerCase();
-    return window.location?.protocol === 'https:' && h.endsWith('.vercel.app');
+    if (window.location?.protocol !== 'https:' || !h || h === 'localhost' || h === '127.0.0.1') {
+      return false;
+    }
+    return (
+      String(import.meta.env.VITE_USE_COOKIE_PROXY || '').toLowerCase() === 'true' ||
+      h.endsWith('.vercel.app') ||
+      CUSTOM_COOKIE_PROXY_HOSTS.has(h)
+    );
   } catch {
     return false;
   }
