@@ -606,7 +606,7 @@ export default function App() {
       ) : activeTab === 'diagnostic' ? (
         <div key="tab-diagnostic" className="view-enter flex-1 overflow-hidden flex flex-col bg-[#090c12]">
           {canGoBack && (
-            <div className="shrink-0 bg-[#101521]/95 backdrop-blur-md border-b border-slate-800/80 px-3.5 py-2.5 flex items-center justify-between">
+            <div className="shrink-0 bg-[#101521] md:bg-[#101521]/95 border-b border-slate-800/80 px-3.5 py-2.5 flex items-center justify-between">
               <button
                 onClick={goBackTab}
                 className="inline-flex items-center gap-1.5 text-xs font-semibold text-cyan-300 hover:text-white bg-[#172033] border border-slate-700/70 px-3 py-1.5 rounded-lg"
@@ -628,7 +628,7 @@ export default function App() {
       ) : activeTab === 'maintenance' ? (
         <div key="tab-maintenance" className="view-enter flex-1 overflow-hidden flex flex-col bg-[#090c12]">
           {canGoBack && (
-            <div className="shrink-0 bg-[#101521]/95 backdrop-blur-md border-b border-slate-800/80 px-3.5 py-2.5 flex items-center justify-between">
+            <div className="shrink-0 bg-[#101521] md:bg-[#101521]/95 border-b border-slate-800/80 px-3.5 py-2.5 flex items-center justify-between">
               <button
                 onClick={goBackTab}
                 className="inline-flex items-center gap-1.5 text-xs font-semibold text-cyan-300 hover:text-white bg-[#172033] border border-slate-700/70 px-3 py-1.5 rounded-lg"
@@ -649,7 +649,7 @@ export default function App() {
       ) : activeTab === 'tickets' ? (
         <div key="tab-tickets" className="view-enter flex-1 overflow-hidden flex flex-col bg-[#090c12]">
           {canGoBack && (
-            <div className="shrink-0 bg-[#101521]/95 backdrop-blur-md border-b border-slate-800/80 px-3.5 py-2.5 flex items-center justify-between">
+            <div className="shrink-0 bg-[#101521] md:bg-[#101521]/95 border-b border-slate-800/80 px-3.5 py-2.5 flex items-center justify-between">
               <button
                 onClick={goBackTab}
                 className="inline-flex items-center gap-1.5 text-xs font-semibold text-cyan-300 hover:text-white bg-[#172033] border border-slate-700/70 px-3 py-1.5 rounded-lg"
@@ -780,7 +780,7 @@ export default function App() {
       )}
 
       {showAppNav && (
-        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-[#101521]/95 backdrop-blur-xl border-t border-slate-800/90 px-1.5 pt-1.5 safe-bottom flex items-center justify-around shadow-[0_-8px_24px_rgba(0,0,0,0.45)]">
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-[#101521] border-t border-slate-800/90 px-1.5 pt-1.5 safe-bottom flex items-center justify-around shadow-[0_-8px_24px_rgba(0,0,0,0.45)]">
           <MobileNavBtn icon={Smartphone} label="Equipo" active={activeTab === 'scanner'} onClick={() => navigateToTab('scanner')} />
           <MobileNavBtn icon={Stethoscope} label="Diagnóst." active={activeTab === 'diagnostic'} onClick={() => navigateToTab('diagnostic')} />
           <MobileNavBtn icon={Snowflake} label="Cuidado" active={activeTab === 'maintenance'} onClick={() => navigateToTab('maintenance')} />
@@ -800,7 +800,7 @@ export default function App() {
   );
 }
 
-function TabletNavBtn({ icon: Icon, label, active, onClick }) {
+const TabletNavBtn = React.memo(function TabletNavBtn({ icon: Icon, label, active, onClick }) {
   return (
     <button
       onClick={onClick}
@@ -815,9 +815,9 @@ function TabletNavBtn({ icon: Icon, label, active, onClick }) {
       <span className="text-[9px] font-semibold leading-tight">{label}</span>
     </button>
   );
-}
+});
 
-function MobileNavBtn({ icon: Icon, label, active, onClick }) {
+const MobileNavBtn = React.memo(function MobileNavBtn({ icon: Icon, label, active, onClick }) {
   return (
     <button
       onClick={onClick}
@@ -830,9 +830,9 @@ function MobileNavBtn({ icon: Icon, label, active, onClick }) {
       <span className="text-[9px] font-semibold leading-tight">{label}</span>
     </button>
   );
-}
+});
 
-function ToolbarBtn({ icon: Icon, label, active, onClick }) {
+const ToolbarBtn = React.memo(function ToolbarBtn({ icon: Icon, label, active, onClick }) {
   return (
     <button
       onClick={onClick}
@@ -846,4 +846,4 @@ function ToolbarBtn({ icon: Icon, label, active, onClick }) {
       <span className="hidden xl:inline">{label}</span>
     </button>
   );
-}
+});

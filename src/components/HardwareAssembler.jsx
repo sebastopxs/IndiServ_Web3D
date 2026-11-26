@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { useFrame } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 
@@ -180,4 +181,12 @@ export default function HardwareAssembler({ profile, telemetry, onSelect, explod
   );
 }
 
-useGLTF.preload(DESKTOP_MODEL_PATH);
+try {
+  if (Capacitor.isNativePlatform()) {
+    useGLTF.preload(PHONE_MODEL_PATH);
+  } else {
+    useGLTF.preload(DESKTOP_MODEL_PATH);
+  }
+} catch {
+  useGLTF.preload(DESKTOP_MODEL_PATH);
+}

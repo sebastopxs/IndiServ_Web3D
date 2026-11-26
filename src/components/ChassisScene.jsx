@@ -2,9 +2,10 @@
  * ChassisScene.jsx — Escena WebGL (React Three Fiber) con iluminación, cámara, sombras y controles orbitales.
  */
 
-import React, { Suspense, useRef, useEffect } from 'react';
+import React, { Suspense, useRef, useEffect, useMemo } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { Canvas } from '@react-three/fiber';
-import { OrbitControls, Environment, Bounds, ContactShadows, useBounds, Center, Html, useProgress, Grid } from '@react-three/drei';
+import { OrbitControls, Environment, Lightformer, Bounds, ContactShadows, useBounds, Center, Html, useProgress, Grid } from '@react-three/drei';
 import HardwareAssembler from './HardwareAssembler';
 
 function Loader() {
@@ -75,23 +76,34 @@ function CameraReset({ onReset }) {
 
 export default function ChassisScene({ profile, telemetry, onSelectComponent, explodedView, registerReset }) {
   const controlsRef = useRef();
+  const isMobilePerf = useMemo(() => {
+    try {
+      if (Capacitor.isNativePlatform()) return true;
+    } catch {}
+    return typeof window !== 'undefined' && window.innerWidth < 1024;
+  }, []);
 
   return (
     <div className="w-full h-full">
       <Canvas
         shadows
         camera={{ position: [-12, 7, 14], fov: 38 }}
-        dpr={[1, 1.5]}
-
+        dpr={isMobilePerf ? [1, 1.25] : [1, 1.5]}
         gl={{ powerPreference: 'high-performance', antialias: false, preserveDrawingBuffer: false }}
       >
         <color attach="background" args={['#09090b']} />
         <fog attach="fog" args={['#09090b', 25, 55]} />
 
-        <ambientLight intensity={0.35} />
-        <directionalLight position={[12, 18, 10]} intensity={2.2} castShadow shadow-bias={-0.0001} shadow-mapSize={[1024, 1024]} />
-        <directionalLight position={[-8, 6, -12]} intensity={0.8} color="#e2e8f0" />
-        <directionalLight position={[0, 4, -16]} intensity={0.6} color="#06b6d4" />
+        <ambientLight intensity={0.45} />
+        <directionalLight
+          position={[12, 18, 10]}
+          intensity={2.2}
+          castShadow
+          shadow-bias={-0.0001}
+          shadow-mapSize={isMobilePerf ? [512, 512] : [1024, 1024]}
+        />
+        <directionalLight position={[-8, 6, -12]} intensity={0.85} color="#e2e8f0" />
+        <directionalLight position={[0, 4, -16]} intensity={0.65} color="#06b6d4" />
 
         <Suspense fallback={<Loader />}>
           <Bounds fit clip observe margin={1.3}>
@@ -122,7 +134,7 @@ export default function ChassisScene({ profile, telemetry, onSelectComponent, ex
             raycast={() => null}
           />
           <ContactShadows
-            resolution={512}
+            resolution={isMobilePerf ? 256 : 512}
             frames={1}
             scale={35}
             blur={2}
@@ -132,7 +144,11 @@ export default function ChassisScene({ profile, telemetry, onSelectComponent, ex
             position={[0, -4.5, 0]}
             raycast={() => null}
           />
-          <Environment preset="city" />
+          <Environment resolution={isMobilePerf ? 64 : 128} frames={1}>
+            <Lightformer form="rect" intensity={2.2} position={[0, 10, 6]} scale={[14, 6, 1]} color="#f8fafc" />
+            <Lightformer form="rect" intensity={1.3} position={[-10, 4, -6]} scale={[10, 6, 1]} color="#cbd5e1" />
+            <Lightformer form="rect" intensity={1.1} position={[10, 3, -8]} scale={[8, 5, 1]} color="#22d3ee" />
+          </Environment>
         </Suspense>
 
         <OrbitControls

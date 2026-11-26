@@ -70,20 +70,38 @@ input:focus-visible {
 
 /* Obsidian Instrument surfaces with subtle top specular hairline */
 .instrument-panel {
-  background: rgba(16, 21, 33, 0.84);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  background: rgba(16, 21, 33, 0.86);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--border-hairline);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.06),
     0 12px 32px rgba(0, 0, 0, 0.42);
 }
 
+/* On Android WebView & touch tablets, skip expensive real-time backdrop readback */
+@media (max-width: 1024px), (pointer: coarse) {
+  .instrument-panel {
+    background: rgba(16, 21, 33, 0.95);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.06),
+      0 8px 20px rgba(0, 0, 0, 0.45);
+  }
+}
+
 .instrument-card {
   background: var(--surface-card);
   border: 1px solid var(--border-hairline);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  transition: border-color 180ms ease, transform 180ms var(--ease-out);
+  contain: layout style;
+  transition: border-color 160ms ease, transform 160ms var(--ease-out);
+}
+
+.overflow-y-auto {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
 }
 
 @media (hover: hover) and (pointer: fine) {

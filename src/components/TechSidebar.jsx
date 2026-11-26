@@ -46,7 +46,7 @@ function parseBoardFallback(placaBase = '') {
 export default function TechSidebar({ selectedComponent, ticketData, onCloseComponent }) {
   if (!ticketData) {
     return (
-      <aside className="w-full md:w-[410px] shrink-0 h-[44vh] md:h-full bg-[#101521]/95 backdrop-blur-xl border-t md:border-t-0 md:border-l border-slate-800/80 p-6">
+      <aside className="w-full md:w-[410px] shrink-0 h-[44vh] md:h-full bg-[#101521] md:bg-[#101521]/95 md:backdrop-blur-xl border-t md:border-t-0 md:border-l border-slate-800/80 p-6">
         <div className="animate-pulse space-y-6">
           <div className="h-8 bg-slate-800/70 rounded-lg w-2/3" />
           <div className="h-28 bg-slate-800/50 rounded-xl" />
@@ -204,7 +204,7 @@ export default function TechSidebar({ selectedComponent, ticketData, onCloseComp
   }
 
   return (
-    <aside className="w-full md:w-[416px] shrink-0 h-[48vh] md:h-full bg-[#101521]/95 backdrop-blur-xl border-t md:border-t-0 md:border-l border-slate-800/80 flex flex-col overflow-hidden relative z-10 select-none pb-16 md:pb-0 shadow-[inset_1px_0_0_rgba(255,255,255,0.03)]">
+    <aside className="w-full md:w-[416px] shrink-0 h-[48vh] md:h-full bg-[#101521] md:bg-[#101521]/95 md:backdrop-blur-xl border-t md:border-t-0 md:border-l border-slate-800/80 flex flex-col overflow-hidden relative z-10 select-none pb-16 md:pb-0 shadow-[inset_1px_0_0_rgba(255,255,255,0.03)]">
       <div className="flex-1 overflow-y-auto px-5 md:px-6 pt-5 md:pt-6 pb-10 space-y-5">
         <header className="pb-4 border-b border-slate-800/80 space-y-2">
           <div className="flex items-center justify-between gap-2">
