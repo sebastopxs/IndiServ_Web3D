@@ -1,0 +1,91 @@
+name: Security Pin & Secret Monitor
+
+on:
+  schedule:
+    # Todos los lunes a las 09:00 UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  spki-pin-audit:
+    name: Verificar SPKI Pins TLS en Vivo y Vencimiento
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repositorio
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Configurar Python 3.12
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: Instalar cryptography
+        run: python -m pip install cryptography==50.0.2
+
+      - name: Validar cadena TLS en vivo contra network_security_config.xml
+        run: |
+          python - <<'PY'
+          import base64, datetime, hashlib, socket, ssl, sys
+          import xml.etree.ElementTree as ET
+          from cryptography import x509
+          from cryptography.hazmat.primitives import serialization
+
+          cfg_path = "android/app/src/main/res/xml/network_security_config.xml"
+          tree = ET.parse(cfg_path)
+          root = tree.getroot()
+
+          domain_cfg = root.find("domain-config")
+          assert domain_cfg is not None, "Falta <domain-config> en network_security_config.xml"
+
+          domains = [el.text.strip() for el in domain_cfg.findall("domain") if el.text and el.text.strip()]
+          pin_set = domain_cfg.find("pin-set")
+          assert pin_set is not None, "Falta <pin-set>"
+
+          exp_str = (pin_set.attrib.get("expiration") or "").strip()
+          exp_date = datetime.date.fromisoformat(exp_str)
+          days_left = (exp_date - datetime.date.today()).days
+          print(f"Pin-set expiration: {exp_date} ({days_left} days left)")
+          if days_left < 90:
+              print(f"::error::SPKI pin-set expires in {days_left} days (< 90). Renew pins and rebuild APK!")
+              sys.exit(1)
+
+          configured_pins = {el.text.strip() for el in pin_set.findall("pin") if el.text and el.text.strip()}
+          print(f"Configured pins ({len(configured_pins)}): {sorted(configured_pins)}")
+
+          for host in domains:
+              ctx = ssl.create_default_context()
+              with socket.create_connection((host, 443), timeout=15) as sock:
+                  with ctx.wrap_socket(sock, server_hostname=host) as ssock:
+                      chain = ssock.get_verified_chain()
+                      live_pins = []
+                      for der in chain:
+                          cert = x509.load_der_x509_certificate(der)
+                          spki = cert.public_key().public_bytes(
+                              serialization.Encoding.DER,
+                              serialization.PublicFormat.SubjectPublicKeyInfo,
+                          )
+                          live_pins.append(base64.b64encode(hashlib.sha256(spki).digest()).decode("ascii"))
+              matched = configured_pins.intersection(live_pins)
+              print(f"Host {host}: matched pins = {sorted(matched)}")
+              if not matched:
+                  print(f"::error::No configured SPKI pin matches live TLS chain for {host}! Live pins: {live_pins}")
+                  sys.exit(1)
+
+          print("SPKI_PIN_MONITOR_OK")
+          PY
+
+  weekly-secret-scan:
+    name: Escaneo Semanal de Secretos (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repositorio
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - name: Escanear secretos filtrados
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
