@@ -4,6 +4,7 @@
  */
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const ALLOWED_ORIGINS = new Set([
   "https://indiserv-web3d.vercel.app",
@@ -15,16 +16,9 @@ const ALLOWED_ORIGINS = new Set([
   "http://localhost:4173",
 ]);
 
-const VERCEL_PREVIEW_REGEX = /^https:\/\/indiserv-web3d(-[a-z0-9-]+)?\.vercel\.app$/i;
-
-const RATE_WINDOW_MS = 60_000;
-const MAX_REQ_PER_WINDOW = 12;
-const ipHits = new Map<string, number[]>();
-
 function isOriginAllowed(origin: string | null): boolean {
   if (!origin) return true; // Peticiones nativas sin cabecera Origin (Android/Desktop)
-  const clean = origin.trim();
-  return ALLOWED_ORIGINS.has(clean) || VERCEL_PREVIEW_REGEX.test(clean);
+  return ALLOWED_ORIGINS.has(origin.trim());
 }
 
 function getCorsHeaders(req: Request): Record<string, string> {
@@ -39,20 +33,9 @@ function getCorsHeaders(req: Request): Record<string, string> {
   };
 }
 
-function checkEdgeRateLimit(req: Request): boolean {
-  const ip =
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    req.headers.get("cf-connecting-ip") ||
-    "anon";
-  const now = Date.now();
-  const prev = (ipHits.get(ip) || []).filter((t) => now - t < RATE_WINDOW_MS);
-  if (prev.length >= MAX_REQ_PER_WINDOW) {
-    ipHits.set(ip, prev);
-    return false;
-  }
-  prev.push(now);
-  ipHits.set(ip, prev);
-  return true;
+async function sha256Hex(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 interface TelemetryInput {
@@ -142,23 +125,57 @@ Deno.serve(async (req: Request) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
-  if (!checkEdgeRateLimit(req)) {
-    return new Response(
-      JSON.stringify({ error: "Demasiadas solicitudes de análisis IA. Intente en 60 segundos." }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 429 },
-    );
-  }
-
   try {
     const rawBodyText = await req.text();
-    if (rawBodyText.length > 4096) {
+    if (rawBodyText.length > 6144) {
       return new Response(
-        JSON.stringify({ error: "Payload excede el límite de seguridad permitido (4 KB)." }),
+        JSON.stringify({ error: "Payload excede el límite de seguridad permitido (6 KB)." }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 413 },
       );
     }
     const body = rawBodyText ? JSON.parse(rawBodyText) : {};
-    const rawTelemetry: Record<string, unknown> = body?.telemetry || body || {};
+
+    // Exigir sesión activa verificada + rate-limit persistente en PostgreSQL para proteger cuota Gemini
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const sessionToken = String(body?.session_token || "").trim();
+    const deviceHash = String(body?.device_hash || "").trim();
+
+    if (!supabaseUrl || !serviceKey || !sessionToken || !/^[a-fA-F0-9]{32,128}$/.test(deviceHash)) {
+      return new Response(
+        JSON.stringify({ error: "Sesión autenticada requerida para usar Auditoría IA." }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 401 },
+      );
+    }
+
+    const admin = createClient(supabaseUrl, serviceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const tokenHash = await sha256Hex(sessionToken);
+    const { data: sess, error: sessErr } = await admin.rpc("validar_sesion_15m", {
+      p_token_hash: tokenHash,
+      p_device_hash: deviceHash,
+    });
+    if (sessErr || !sess?.ok) {
+      return new Response(
+        JSON.stringify({ error: "Sesión expirada o inválida. Vuelva a iniciar sesión." }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 401 },
+      );
+    }
+
+    const { data: rl } = await admin.rpc("consumir_rate_limit", {
+      p_key: `ia:${sess.dni}`,
+      p_window_sec: 60,
+      p_max_hits: 8,
+    });
+    if (rl && rl.allowed === false) {
+      return new Response(
+        JSON.stringify({ error: `Demasiadas solicitudes de análisis IA. Intente en ${rl.wait_sec || 60} s.` }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 429 },
+      );
+    }
+
+    const rawTelemetry: Record<string, unknown> = body?.telemetry || {};
 
     // Sanitizar y truncar campos de texto antes de interpolar en el prompt
     const telemetry: TelemetryInput = {};

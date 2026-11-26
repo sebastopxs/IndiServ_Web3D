@@ -378,8 +378,18 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
     setAiLoading(true);
     setSavedAiId(null);
     try {
+      const { loadSessionToken } = await import('../utils/security');
+      const saved = loadSessionToken();
+      if (!saved) {
+        setAiAudit(runLocalDeviceAudit(info));
+        return;
+      }
       const { data, error } = await supabase.functions.invoke('analizar-dispositivo-ia', {
-        body: { telemetry: info },
+        body: {
+          telemetry: info,
+          session_token: saved.token,
+          device_hash: saved.deviceHash,
+        },
       });
       let auditResult;
       if (!error && data && !data.error && data.nombre_comercial) {

@@ -37,15 +37,16 @@ const ALLOWED_ORIGINS = new Set([
   "http://127.0.0.1:5173",
   "http://localhost:4173",
 ]);
-const VERCEL_PREVIEW_REGEX = /^https:\/\/indiserv-web3d(-[a-z0-9-]+)?\.vercel\.app$/i;
 
-const RATE_WINDOW_MS = 60_000;
-const MAX_REQ_PER_IP_MIN = 30;
+const MAX_REQ_PER_IP_MIN = 45;
 const MAX_OTP_PER_HOUR_DNI = 5;
 const OTP_RESEND_COOLDOWN_SEC = 60;
 const MAX_BODY_BYTES = 8 * 1024;
+const MAX_TICKET_BODY_BYTES = 64 * 1024;
 const MAX_AVATAR_BODY_BYTES = 120 * 1024;
 const MAX_AVATAR_DECODED_BYTES = 75_000;
+const PBKDF2_ITERATIONS = 210_000;
+const LEGACY_SALT_NAMESPACE = "INDISERV_SALT_2026";
 
 const HONEY_DNIS = new Set(["00000000", "99999999", "12345678", "87654321", "11111111", "admin", "root"]);
 const HONEY_EMAILS = new Set([
@@ -57,12 +58,9 @@ const HONEY_EMAILS = new Set([
   "admin@unmsm.edu.pe",
 ]);
 
-const ipHits = new Map<string, number[]>();
-
 function isOriginAllowed(origin: string | null): boolean {
   if (!origin) return true; // Desktop Python / Android nativo sin cabecera Origin
-  const clean = origin.trim();
-  return ALLOWED_ORIGINS.has(clean) || VERCEL_PREVIEW_REGEX.test(clean);
+  return ALLOWED_ORIGINS.has(origin.trim());
 }
 
 function getCorsHeaders(req: Request): Record<string, string> {
@@ -79,22 +77,147 @@ function getCorsHeaders(req: Request): Record<string, string> {
 
 function getClientIp(req: Request): string {
   return (
+    req.headers.get("cf-connecting-ip")?.trim() ||
     req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    req.headers.get("cf-connecting-ip") ||
     "anon"
   );
 }
 
-function checkIpRateLimit(ip: string): boolean {
-  const now = Date.now();
-  const prev = (ipHits.get(ip) || []).filter((t) => now - t < RATE_WINDOW_MS);
-  if (prev.length >= MAX_REQ_PER_IP_MIN) {
-    ipHits.set(ip, prev);
-    return false;
+function timingSafeEqualStr(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   }
-  prev.push(now);
-  ipHits.set(ip, prev);
-  return true;
+  return diff === 0;
+}
+
+function fromHex(hex: string): Uint8Array {
+  const out = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < out.length; i++) {
+    out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return out;
+}
+
+async function computeLegacyV1Hash(dni: string, plainPassword: string): Promise<string> {
+  const raw = `${LEGACY_SALT_NAMESPACE}::${dni.trim()}::${plainPassword}`;
+  return `indiserv_v1$${await sha256Hex(raw)}`;
+}
+
+async function hashPasswordPbkdf2(secretInput: string, pepper: string): Promise<string> {
+  const salt = new Uint8Array(16);
+  crypto.getRandomValues(salt);
+  const keyMat = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(`${pepper}::${secretInput}`),
+    "PBKDF2",
+    false,
+    ["deriveBits"]
+  );
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt, iterations: PBKDF2_ITERATIONS, hash: "SHA-256" },
+    keyMat,
+    256
+  );
+  return `indiserv_pbkdf2$${PBKDF2_ITERATIONS}$${toHex(salt)}$${toHex(bits)}`;
+}
+
+async function verifyPasswordPbkdf2(secretInput: string, stored: string, pepper: string): Promise<boolean> {
+  const parts = stored.split("$");
+  if (parts.length !== 4 || parts[0] !== "indiserv_pbkdf2") return false;
+  const iterations = Number(parts[1]);
+  const saltHex = parts[2];
+  const expectedHex = parts[3];
+  if (!Number.isFinite(iterations) || iterations < 50_000 || iterations > 1_000_000) return false;
+  if (!/^[a-f0-9]{16,64}$/i.test(saltHex) || !/^[a-f0-9]{64}$/i.test(expectedHex)) return false;
+
+  const keyMat = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(`${pepper}::${secretInput}`),
+    "PBKDF2",
+    false,
+    ["deriveBits"]
+  );
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt: fromHex(saltHex), iterations, hash: "SHA-256" },
+    keyMat,
+    256
+  );
+  return timingSafeEqualStr(toHex(bits), expectedHex.toLowerCase());
+}
+
+/**
+ * Verifica credenciales contra usuarios_app soportando PBKDF2 en servidor y migrando
+ * transparentemente cuentas legacy (indiserv_v1$) a PBKDF2 en su primer login válido.
+ */
+async function verifyUserCredentialsAndMigrate(
+  // deno-lint-ignore no-explicit-any
+  admin: any,
+  dni: string,
+  correo: string,
+  plainPassword: string,
+  clientLegacyHash: string,
+  pepper: string
+): Promise<{ ok: true; dni: string; correo: string; nickname: string; avatar_data: string | null } | { ok: false }> {
+  const cleanDni = dni.trim();
+  const cleanCorreo = correo.trim().toLowerCase();
+  const { data: user, error } = await admin
+    .from("usuarios_app")
+    .select("dni, correo, nickname, password_hash, avatar_data")
+    .eq("dni", cleanDni)
+    .maybeSingle();
+
+  if (error || !user) return { ok: false };
+  if (String(user.correo || "").trim().toLowerCase() !== cleanCorreo) return { ok: false };
+
+  const stored = String(user.password_hash || "").trim();
+  let matched = false;
+  let needsUpgrade = false;
+  let upgradeSecret = plainPassword || clientLegacyHash;
+
+  if (stored.startsWith("indiserv_pbkdf2$")) {
+    if (plainPassword) {
+      matched = await verifyPasswordPbkdf2(plainPassword, stored, pepper);
+      if (!matched) {
+        const legacyCompat = await computeLegacyV1Hash(cleanDni, plainPassword);
+        matched = await verifyPasswordPbkdf2(legacyCompat, stored, pepper);
+        if (matched) {
+          // Re-hash limpio directamente sobre plainPassword
+          needsUpgrade = true;
+          upgradeSecret = plainPassword;
+        }
+      }
+    } else if (clientLegacyHash) {
+      matched = await verifyPasswordPbkdf2(clientLegacyHash, stored, pepper);
+    }
+  } else if (stored.startsWith("indiserv_v1$")) {
+    const candidateV1 = plainPassword ? await computeLegacyV1Hash(cleanDni, plainPassword) : clientLegacyHash;
+    if (candidateV1 && timingSafeEqualStr(stored, candidateV1)) {
+      matched = true;
+      needsUpgrade = true;
+      upgradeSecret = plainPassword || candidateV1;
+    }
+  }
+
+  if (!matched) return { ok: false };
+
+  if (needsUpgrade && upgradeSecret && pepper) {
+    try {
+      const upgradedHash = await hashPasswordPbkdf2(upgradeSecret, pepper);
+      await admin.from("usuarios_app").update({ password_hash: upgradedHash }).eq("dni", cleanDni);
+    } catch {
+      // No bloquear login si falla la migración oportunista
+    }
+  }
+
+  return {
+    ok: true,
+    dni: String(user.dni).trim(),
+    correo: String(user.correo).trim(),
+    nickname: String(user.nickname || "Operador").trim(),
+    avatar_data: user.avatar_data || null,
+  };
 }
 
 function isHoney(dni: string, correo = ""): boolean {
@@ -458,12 +581,6 @@ Deno.serve(async (req: Request) => {
   }
 
   const ip = getClientIp(req);
-  if (!checkIpRateLimit(ip)) {
-    return new Response(
-      JSON.stringify({ ok: false, error: "Demasiadas solicitudes. Espera 1 minuto." }),
-      { status: 429, headers: { ...cors, "Content-Type": "application/json" } }
-    );
-  }
 
   const rawText = await req.text();
   if (rawText.length > MAX_AVATAR_BODY_BYTES) {
@@ -485,7 +602,13 @@ Deno.serve(async (req: Request) => {
   }
 
   const action = String(body?.action || "").trim();
-  if (action !== "profile_update_avatar" && rawText.length > MAX_BODY_BYTES) {
+  const maxAllowedBytes =
+    action === "profile_update_avatar"
+      ? MAX_AVATAR_BODY_BYTES
+      : action === "tickets_upsert" || action === "suggestion_save"
+      ? MAX_TICKET_BODY_BYTES
+      : MAX_BODY_BYTES;
+  if (rawText.length > maxAllowedBytes) {
     return new Response(JSON.stringify({ ok: false, error: "Payload demasiado grande." }), {
       status: 413,
       headers: { ...cors, "Content-Type": "application/json" },
@@ -512,6 +635,16 @@ Deno.serve(async (req: Request) => {
       status,
       headers: { ...cors, "Content-Type": "application/json" },
     });
+
+  // Rate-limit persistente en PostgreSQL (inmune a cold starts)
+  const { data: rlIp } = await admin.rpc("consumir_rate_limit", {
+    p_key: `ip:${ip}`,
+    p_window_sec: 60,
+    p_max_hits: MAX_REQ_PER_IP_MIN,
+  });
+  if (rlIp && rlIp.allowed === false) {
+    return json({ ok: false, error: `Demasiadas solicitudes. Espera ${rlIp.wait_sec || 60} s.` }, 429);
+  }
 
   try {
     // -------------------------------------------------------------------------
@@ -670,6 +803,167 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    // -------------------------------------------------------------------------
+    // 2F. TICKETS UPSERT / LIST / PUBLIC GET / SUGGESTIONS / HONEYTOKENS (BOLA-FREE)
+    // -------------------------------------------------------------------------
+    if (action === "tickets_upsert") {
+      const sess = await requireActiveSession(admin, body);
+      if (!sess.ok) {
+        return json({ ok: false, session_expired: true, error: "Sesión expirada. Vuelva a iniciar sesión." }, 401);
+      }
+      const payload = body?.ticket;
+      if (!payload || typeof payload !== "object") {
+        return json({ ok: false, error: "Payload de ticket inválido." }, 400);
+      }
+      const { data: res, error } = await admin.rpc("guardar_ticket_seguro", {
+        p_dni: sess.dni,
+        p_payload: payload,
+      });
+      if (error || !res?.ok) {
+        return json({ ok: false, error: res?.error || "No se pudo guardar el ticket." }, 400);
+      }
+      return json({ ok: true, id_ticket: res.id_ticket });
+    }
+
+    if (action === "tickets_list") {
+      const sess = await requireActiveSession(admin, body);
+      if (!sess.ok) {
+        return json({ ok: false, session_expired: true, error: "Sesión expirada. Vuelva a iniciar sesión." }, 401);
+      }
+      const limite = Math.max(1, Math.min(200, Number(body?.limit || 120)));
+      const { data: res, error } = await admin.rpc("listar_tickets_seguro", {
+        p_dni: sess.dni,
+        p_limite: limite,
+      });
+      if (error || !res?.ok) {
+        return json({ ok: false, error: "No se pudieron consultar tus tickets." }, 500);
+      }
+      return json({ ok: true, tickets: res.tickets || [] });
+    }
+
+    if (action === "ticket_get_public") {
+      const ticketId = String(body?.ticket_id || "").trim();
+      if (ticketId.length < 6 || ticketId.length > 64) {
+        return json({ ok: false, error: "ID de ticket inválido." }, 400);
+      }
+      const { data: res, error } = await admin.rpc("consultar_ticket_publico", {
+        p_ticket_id: ticketId,
+      });
+      if (error || !res?.ok) {
+        return json({ ok: false, error: res?.error || "Ticket no encontrado." }, 404);
+      }
+      return json({ ok: true, ticket: res.ticket });
+    }
+
+    if (action === "suggestion_save") {
+      const sess = await requireActiveSession(admin, body);
+      if (!sess.ok) {
+        return json({ ok: false, session_expired: true, error: "Sesión expirada." }, 401);
+      }
+      const idTicket = String(body?.id_ticket || "").trim();
+      const sugerencia = String(body?.sugerencia || "").trim();
+      if (idTicket.length < 6 || !sugerencia) {
+        return json({ ok: false, error: "Sugerencia inválida." }, 400);
+      }
+      const { data: res, error } = await admin.rpc("guardar_sugerencia_segura", {
+        p_id_ticket: idTicket,
+        p_sugerencia: sugerencia,
+      });
+      if (error || !res?.ok) {
+        return json({ ok: false, error: res?.error || "No se pudo guardar la sugerencia." }, 400);
+      }
+      return json({ ok: true });
+    }
+
+    if (action === "honeytokens_list") {
+      const sess = await requireActiveSession(admin, body);
+      if (!sess.ok) {
+        return json({ ok: false, session_expired: true, error: "Sesión expirada." }, 401);
+      }
+      const limite = Math.max(1, Math.min(50, Number(body?.limit || 15)));
+      const { data: res, error } = await admin.rpc("listar_alertas_honeytoken_seguro", {
+        p_limite: limite,
+      });
+      if (error || !res?.ok) {
+        return json({ ok: false, alerts: [] });
+      }
+      return json({ ok: true, alerts: res.alerts || [] });
+    }
+
+    if (action === "honey_alert") {
+      const tipo = String(body?.tipo || "ALERTA").trim().slice(0, 80);
+      const detalle = String(body?.detalle || "").trim().slice(0, 300);
+      await logHoneyAlert(admin, tipo, detalle, ip);
+      return json({ ok: true });
+    }
+
+    // -------------------------------------------------------------------------
+    // 2G. BIOMETRIC ENROLL & ROTATING TOKEN LOGIN (CERO PASS-THE-HASH)
+    // -------------------------------------------------------------------------
+    if (action === "biometric_enroll") {
+      const sess = await requireActiveSession(admin, body);
+      if (!sess.ok) {
+        return json({ ok: false, session_expired: true, error: "Sesión expirada." }, 401);
+      }
+      const bioToken = generateSessionToken256();
+      const bioHash = await sha256Hex(bioToken);
+      const { data: res, error } = await admin.rpc("emitir_token_biometrico", {
+        p_dni: sess.dni,
+        p_device_hash: sess.deviceHash,
+        p_bio_token_hash: bioHash,
+      });
+      if (error || !res?.ok) {
+        return json({ ok: false, error: res?.error || "No se pudo emitir el token biométrico." }, 400);
+      }
+      return json({ ok: true, biometric_token: bioToken });
+    }
+
+    if (action === "biometric_login") {
+      const dni = String(body?.dni || "").trim();
+      const bioToken = String(body?.biometric_token || "").trim();
+      const deviceHash = String(body?.device_hash || "").trim();
+      if (dni.length < 8 || !/^[a-fA-F0-9]{64}$/.test(bioToken) || !isValidDeviceHash(deviceHash)) {
+        return json({ ok: false, error: "Token biométrico inválido." }, 400);
+      }
+      const oldHash = await sha256Hex(bioToken);
+      const nextBioToken = generateSessionToken256();
+      const nextBioHash = await sha256Hex(nextBioToken);
+
+      const { data: res, error } = await admin.rpc("consumir_y_rotar_token_biometrico", {
+        p_dni: dni,
+        p_device_hash: deviceHash,
+        p_old_bio_hash: oldHash,
+        p_new_bio_hash: nextBioHash,
+      });
+      if (error || !res?.ok) {
+        return json({
+          ok: false,
+          revoked: true,
+          error: "El acceso biométrico fue revocado o expiró. Inicia sesión con tu contraseña.",
+        }, 401);
+      }
+
+      const sessionToken = generateSessionToken256();
+      const tokenHash = await sha256Hex(sessionToken);
+      const { data: sess } = await admin.rpc("emitir_sesion_15m", {
+        p_dni: res.dni,
+        p_device_hash: deviceHash,
+        p_token_hash: tokenHash,
+      });
+      return json({
+        ok: true,
+        session_token: sessionToken,
+        new_biometric_token: nextBioToken,
+        expires_at: sess?.expira_en,
+        user: {
+          dni: res.dni,
+          correo: res.correo,
+          nickname: res.nickname || "Operador",
+          avatar_data: res.avatar_data || null,
+        },
+      });
+    }
+
     if (!otpPepper || otpPepper.length < 16) {
       return json(
         { ok: false, error: "Secreto OTP_PEPPER no configurado en Supabase Secrets." },
@@ -684,19 +978,22 @@ Deno.serve(async (req: Request) => {
       const dni = String(body?.dni || "").trim();
       const nickname = String(body?.nickname || "").trim();
       const correo = String(body?.correo || "").trim().toLowerCase();
-      const passwordHash = String(body?.password_hash || "").trim();
+      const plainPassword = String(body?.password || "").trim();
+      const legacyHash = String(body?.password_hash || "").trim();
       const deviceHash = String(body?.device_hash || "").trim();
       const deviceLabel = String(body?.device_label || "Dispositivo").trim().slice(0, 80);
 
+      const hasValidSecret = plainPassword.length >= 8 || legacyHash.startsWith("indiserv_v1$");
       if (
         dni.length < 8 ||
         !nickname ||
         !correo.includes("@") ||
-        !passwordHash.startsWith("indiserv_v1$") ||
+        !hasValidSecret ||
         !isValidDeviceHash(deviceHash)
       ) {
-        return json({ ok: false, error: "Datos de registro inválidos o incompletos." }, 400);
+        return json({ ok: false, error: "Datos de registro inválidos o contraseña menor a 8 caracteres." }, 400);
       }
+      const passwordHash = await hashPasswordPbkdf2(plainPassword || legacyHash, otpPepper);
 
       if (isHoney(dni, correo)) {
         await logHoneyAlert(admin, "CREDENCIAL_SENUELO_REGISTRO_OTP", `DNI='${dni}' correo='${correo}'`, ip);
@@ -875,11 +1172,12 @@ Deno.serve(async (req: Request) => {
     if (action === "login_init") {
       const dni = String(body?.dni || "").trim();
       const correo = String(body?.correo || "").trim().toLowerCase();
-      const passwordHash = String(body?.password_hash || "").trim();
+      const plainPassword = String(body?.password || "").trim();
+      const legacyHash = String(body?.password_hash || "").trim();
       const deviceHash = String(body?.device_hash || "").trim();
       const deviceLabel = String(body?.device_label || "Dispositivo").trim().slice(0, 80);
 
-      if (!dni || !correo || !passwordHash || !isValidDeviceHash(deviceHash)) {
+      if (!dni || !correo || (!plainPassword && !legacyHash) || !isValidDeviceHash(deviceHash)) {
         return json({ ok: false, error: "Complete DNI, correo y contraseña." }, 400);
       }
 
@@ -888,19 +1186,55 @@ Deno.serve(async (req: Request) => {
         return json({ ok: false, error: "Credenciales incorrectas o cuenta inexistente." });
       }
 
-      const { data: authData, error: authErr } = await admin.rpc("autenticar_usuario", {
-        p_dni: dni,
-        p_correo: correo,
-        p_password_hash: passwordHash,
-      });
+      const lockKey = `login_fail:${dni}`;
+      const { data: lockCheck } = await admin.rpc("verificar_lockout_login", { p_key: lockKey });
+      if (lockCheck?.locked) {
+        return json(
+          {
+            ok: false,
+            locked: true,
+            wait_sec: lockCheck.wait_sec || 60,
+            error: `Cuenta protegida por demasiados intentos fallidos. Espera ${lockCheck.wait_sec || 60} s.`,
+          },
+          429
+        );
+      }
 
-      if (authErr || !authData?.ok) {
+      const authData = await verifyUserCredentialsAndMigrate(
+        admin,
+        dni,
+        correo,
+        plainPassword,
+        legacyHash,
+        otpPepper
+      );
+
+      if (!authData.ok) {
+        const { data: failRes } = await admin.rpc("registrar_fallo_login", {
+          p_key: lockKey,
+          p_max_intentos: 5,
+          p_lock_sec: 120,
+        });
+        if (failRes?.locked) {
+          await logHoneyAlert(admin, "FUERZA_BRUTA_LOGIN_SERVER", `5 fallos sobre DNI='${dni}'`, ip);
+          return json(
+            {
+              ok: false,
+              locked: true,
+              wait_sec: failRes.wait_sec || 120,
+              error: `Demasiados intentos fallidos. Espera ${failRes.wait_sec || 120} s.`,
+            },
+            429
+          );
+        }
         return json({ ok: false, error: "Credenciales incorrectas o cuenta inexistente." });
       }
 
-      const verifiedDni = String(authData.dni).trim();
-      const verifiedCorreo = String(authData.correo).trim();
-      const verifiedNick = String(authData.nickname || "Operador").trim();
+      await admin.rpc("limpiar_fallos_login", { p_key: lockKey });
+
+      const verifiedDni = authData.dni;
+      const verifiedCorreo = authData.correo;
+      const verifiedNick = authData.nickname;
 
       // Revisar si el dispositivo ya es confiable para este usuario
       const { data: trusted } = await admin
@@ -1094,25 +1428,33 @@ Deno.serve(async (req: Request) => {
       if (!sess.ok) {
         return json({ ok: false, session_expired: true, error: "Sesión expirada. Vuelva a iniciar sesión." }, 401);
       }
+      const curPlain = String(body?.current_password || "").trim();
+      const newPlain = String(body?.new_password || "").trim();
       const currentHash = String(body?.current_password_hash || "").trim();
-      const newHash = String(body?.new_password_hash || "").trim();
+      const legacyNewHash = String(body?.new_password_hash || "").trim();
       const deviceLabel = String(body?.device_label || "Dispositivo").trim().slice(0, 80);
 
-      if (!currentHash || !newHash.startsWith("indiserv_v1$")) {
-        return json({ ok: false, error: "Complete la contraseña actual y una nueva contraseña válida." }, 400);
+      const hasCur = Boolean(curPlain || currentHash);
+      const hasNew = newPlain.length >= 8 || legacyNewHash.startsWith("indiserv_v1$");
+      if (!hasCur || !hasNew) {
+        return json({ ok: false, error: "Complete la contraseña actual y una nueva contraseña (mín. 8 caracteres)." }, 400);
       }
-      if (currentHash === newHash) {
+      if ((curPlain && newPlain && curPlain === newPlain) || (currentHash && legacyNewHash && currentHash === legacyNewHash)) {
         return json({ ok: false, error: "La nueva contraseña debe ser diferente a la actual." }, 400);
       }
 
-      const { data: authCheck, error: authErr } = await admin.rpc("autenticar_usuario", {
-        p_dni: sess.dni,
-        p_correo: sess.correo,
-        p_password_hash: currentHash,
-      });
-      if (authErr || !authCheck?.ok) {
+      const authCheck = await verifyUserCredentialsAndMigrate(
+        admin,
+        sess.dni,
+        sess.correo,
+        curPlain,
+        currentHash,
+        otpPepper
+      );
+      if (!authCheck.ok) {
         return json({ ok: false, error: "La contraseña actual es incorrecta." });
       }
+      const newHash = await hashPasswordPbkdf2(newPlain || legacyNewHash, otpPepper);
 
       const lim = await checkDniOtpLimits(admin, sess.dni);
       if (!lim.allowed) {
@@ -1329,12 +1671,19 @@ Deno.serve(async (req: Request) => {
     if (action === "password_reset_verify") {
       const challengeId = String(body?.challenge_id || "").trim();
       const code = String(body?.code || "").trim();
-      const newPasswordHash = String(body?.new_password_hash || "").trim();
+      const newPlain = String(body?.new_password || "").trim();
+      const legacyNewHash = String(body?.new_password_hash || "").trim();
       const deviceHash = String(body?.device_hash || "").trim();
 
-      if (!challengeId || !/^\d{6}$/.test(code) || !newPasswordHash.startsWith("indiserv_v1$") || !isValidDeviceHash(deviceHash)) {
-        return json({ ok: false, error: "Ingrese el código de 6 dígitos y una nueva contraseña válida." }, 400);
+      if (
+        !challengeId ||
+        !/^\d{6}$/.test(code) ||
+        (newPlain.length < 8 && !legacyNewHash.startsWith("indiserv_v1$")) ||
+        !isValidDeviceHash(deviceHash)
+      ) {
+        return json({ ok: false, error: "Ingrese el código de 6 dígitos y una nueva contraseña válida (mín. 8 caracteres)." }, 400);
       }
+      const newPasswordHash = await hashPasswordPbkdf2(newPlain || legacyNewHash, otpPepper);
 
       const { data: meta } = await admin
         .from("codigos_otp")
@@ -1399,23 +1748,27 @@ Deno.serve(async (req: Request) => {
       if (!sess.ok) {
         return json({ ok: false, session_expired: true, error: "Sesión expirada. Vuelva a iniciar sesión." }, 401);
       }
+      const curPlain = String(body?.current_password || "").trim();
       const currentHash = String(body?.current_password_hash || "").trim();
       const confirmText = String(body?.confirm_text || "").trim().toUpperCase();
       const deviceLabel = String(body?.device_label || "Dispositivo").trim().slice(0, 80);
 
-      if (!currentHash) {
+      if (!curPlain && !currentHash) {
         return json({ ok: false, error: "Ingrese su contraseña actual para confirmar." }, 400);
       }
       if (!["ELIMINAR", "ELIMINAR MI CUENTA", sess.dni.toUpperCase()].includes(confirmText)) {
         return json({ ok: false, error: "Escriba ELIMINAR para confirmar la eliminación permanente." }, 400);
       }
 
-      const { data: authCheck, error: authErr } = await admin.rpc("autenticar_usuario", {
-        p_dni: sess.dni,
-        p_correo: sess.correo,
-        p_password_hash: currentHash,
-      });
-      if (authErr || !authCheck?.ok) {
+      const authCheck = await verifyUserCredentialsAndMigrate(
+        admin,
+        sess.dni,
+        sess.correo,
+        curPlain,
+        currentHash,
+        otpPepper
+      );
+      if (!authCheck.ok) {
         return json({ ok: false, error: "La contraseña actual es incorrecta." });
       }
 

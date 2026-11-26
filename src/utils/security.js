@@ -159,14 +159,13 @@ export function isHoneyTicket(ticketId) {
 
 export async function triggerHoneytokenAlert(tipo, detalle) {
   const alertId = `HONEY-${randomHex(4)}`;
-  const ts = new Date().toISOString().replace('T', ' ').slice(0, 19);
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 110) : 'Web/Android';
-  const sugerencia = `[ALERTA-HONEYTOKEN] ${tipo} | ${detalle} | UA: ${ua} | Fecha: ${ts}`;
-
   try {
-    await supabase
-      .from('sugerencias_locales')
-      .upsert({ id_ticket: alertId, sugerencia }, { onConflict: 'id_ticket' });
+    await callAuthOtp({
+      action: 'honey_alert',
+      tipo: String(tipo || 'ALERTA').slice(0, 80),
+      detalle: `${String(detalle || '').slice(0, 180)} | UA: ${ua}`,
+    });
   } catch {
     // Silencioso para no alertar al atacante
   }
@@ -175,14 +174,15 @@ export async function triggerHoneytokenAlert(tipo, detalle) {
 
 export async function fetchHoneytokenAlerts(limit = 15) {
   try {
-    const { data, error } = await supabase
-      .from('sugerencias_locales')
-      .select('id_ticket, sugerencia')
-      .like('id_ticket', 'HONEY-%')
-      .order('id_ticket', { ascending: false })
-      .limit(limit);
-    if (error) return [];
-    return data || [];
+    const saved = loadSessionToken();
+    if (!saved) return [];
+    const res = await callAuthOtp({
+      action: 'honeytokens_list',
+      session_token: saved.token,
+      device_hash: saved.deviceHash,
+      limit,
+    });
+    return res?.ok && Array.isArray(res.alerts) ? res.alerts : [];
   } catch {
     return [];
   }

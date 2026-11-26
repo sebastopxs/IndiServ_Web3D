@@ -287,12 +287,11 @@ export default function MobileAccountView({
     setBioBusy(true);
     try {
       const dev = await getDeviceFingerprint();
-      const hashed = await hashPassword(user.dni, cleanPwd);
       const check = await callAuthOtp({
         action: 'login_init',
         dni: user.dni,
         correo: user.correo,
-        password_hash: hashed,
+        password: cleanPwd,
         device_hash: dev.deviceHash,
         device_label: dev.deviceLabel,
         plataforma: dev.plataforma,
@@ -301,17 +300,25 @@ export default function MobileAccountView({
         setBioMsg({ type: 'err', text: check.error_conexion });
         return;
       }
-      if (!check?.ok) {
+      if (!check?.ok || !check.session_token) {
         setBioMsg({ type: 'err', text: check?.error || 'Contraseña actual incorrecta.' });
         return;
       }
-      if (check.session_token) {
-        saveSessionToken(check.session_token, dev.deviceHash);
+      saveSessionToken(check.session_token, dev.deviceHash);
+
+      const enroll = await callAuthOtp({
+        action: 'biometric_enroll',
+        session_token: check.session_token,
+        device_hash: dev.deviceHash,
+      });
+      if (!enroll?.ok || !enroll.biometric_token) {
+        setBioMsg({ type: 'err', text: enroll?.error || 'No se pudo generar el token biométrico.' });
+        return;
       }
+
       const bioRes = await enableBiometricLogin({
         dni: user.dni,
-        correo: user.correo,
-        password_hash: hashed,
+        biometric_token: enroll.biometric_token,
         nickname: user.nickname || 'Operador',
       });
       if (bioRes?.ok) {
@@ -437,17 +444,13 @@ export default function MobileAccountView({
     setPwdBusy(true);
     try {
       const dev = await getDeviceFingerprint();
-      const [curHash, newHash] = await Promise.all([
-        hashPassword(user.dni, curPwd.trim()),
-        hashPassword(user.dni, newPwd.trim()),
-      ]);
       const res = await callAuthOtp({
         action: 'password_change_init',
         session_token: saved.token,
         device_hash: saved.deviceHash,
         device_label: dev.deviceLabel,
-        current_password_hash: curHash,
-        new_password_hash: newHash,
+        current_password: curPwd.trim(),
+        new_password: newPwd.trim(),
       });
       if (res?.session_expired) {
         onSessionExpired?.();
@@ -537,13 +540,12 @@ export default function MobileAccountView({
     setDelBusy(true);
     try {
       const dev = await getDeviceFingerprint();
-      const curHash = await hashPassword(user.dni, delPwd.trim());
       const res = await callAuthOtp({
         action: 'account_delete_init',
         session_token: saved.token,
         device_hash: saved.deviceHash,
         device_label: dev.deviceLabel,
-        current_password_hash: curHash,
+        current_password: delPwd.trim(),
         confirm_text: conf,
       });
       if (res?.session_expired) {

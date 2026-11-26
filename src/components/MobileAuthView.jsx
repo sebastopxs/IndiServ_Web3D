@@ -3,11 +3,8 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { supabase } from '../supabaseClient';
 import { POLITICA_PRIVACIDAD_TEXTO, VERSION_POLITICA } from '../utils/legalPolicy';
 import {
-  hashPassword,
-  verifyPassword,
   checkLoginRateLimit,
   recordFailedLogin,
   resetLoginRateLimit,
@@ -34,6 +31,7 @@ import {
 import {
   getBiometricStatus,
   enableBiometricLogin,
+  rotateBiometricToken,
   authenticateBiometricLogin,
   disableBiometricLogin,
 } from '../utils/biometric';
@@ -78,14 +76,19 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo, initialNo
     if (initialNotice) setSuccess(initialNotice);
   }, [initialNotice]);
 
-  const maybeEnrollBiometric = async (userObj, cleanDni, cleanCorreo, passwordHash, enabledFlag) => {
-    if (!enabledFlag || !bioStatus.available) return;
+  const maybeEnrollBiometric = async (userObj, sessionToken, deviceHash, enabledFlag) => {
+    if (!enabledFlag || !bioStatus.available || !sessionToken || !userObj?.dni) return;
     try {
+      const enroll = await callAuthOtp({
+        action: 'biometric_enroll',
+        session_token: sessionToken,
+        device_hash: deviceHash,
+      });
+      if (!enroll?.ok || !enroll.biometric_token) return;
       const res = await enableBiometricLogin({
-        dni: cleanDni,
-        correo: cleanCorreo,
-        password_hash: passwordHash,
-        nickname: userObj?.nickname || 'Operador',
+        dni: userObj.dni,
+        biometric_token: enroll.biometric_token,
+        nickname: userObj.nickname || 'Operador',
       });
       if (res?.ok) {
         const st = await getBiometricStatus();
@@ -116,52 +119,38 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo, initialNo
 
       const dev = await getDeviceFingerprint();
       const otpRes = await callAuthOtp({
-        action: 'login_init',
+        action: 'biometric_login',
         dni: bio.dni,
-        correo: bio.correo,
-        password_hash: bio.password_hash,
+        biometric_token: bio.biometric_token,
         device_hash: dev.deviceHash,
-        device_label: dev.deviceLabel,
-        plataforma: dev.plataforma,
       });
 
       if (otpRes.error_conexion) {
         setError(otpRes.error_conexion);
         return;
       }
-      if (otpRes.ok && otpRes.requires_otp && otpRes.challenge_id) {
-        resetLoginRateLimit();
-        setOtpCode('');
-        setOtpChallenge({
-          challengeId: otpRes.challenge_id,
-          maskedEmail: otpRes.masked_email || bio.correo,
-          proposito: 'new_device',
-          expLeft: Number(otpRes.expires_in_sec || 600),
-          resendLeft: Number(otpRes.resend_cooldown_sec || 60),
-          retryPayload: {
-            action: 'login_init',
-            dni: bio.dni,
-            correo: bio.correo,
-            password_hash: bio.password_hash,
-            device_hash: dev.deviceHash,
-            device_label: dev.deviceLabel,
-            plataforma: dev.plataforma,
-          },
-        });
-        return;
-      }
       if (otpRes.ok && otpRes.session_token && otpRes.user) {
         resetLoginRateLimit();
         saveSessionToken(otpRes.session_token, dev.deviceHash);
+        if (otpRes.new_biometric_token) {
+          await rotateBiometricToken({
+            dni: otpRes.user.dni,
+            biometric_token: otpRes.new_biometric_token,
+            nickname: otpRes.user.nickname || bio.nickname || 'Operador',
+          });
+        }
         onAuthenticated(otpRes.user);
         return;
       }
 
-      // Contraseña modificada o cuenta eliminada: limpiar bóveda biométrica obsoleta
+      // Token revocado, contraseña modificada o cuenta eliminada: limpiar bóveda biométrica
       await disableBiometricLogin();
       const st = await getBiometricStatus();
       setBioStatus(st);
-      setError('Tu contraseña cambió o el acceso anterior venció. Ingresa con contraseña para reactivar tu huella.');
+      setError(
+        otpRes.error ||
+          'Tu contraseña cambió o el acceso biométrico fue revocado. Ingresa con contraseña para reactivarlo.'
+      );
     } catch (err) {
       setError(`Error biométrico: ${err?.message || 'Verifique internet'}`);
     } finally {
@@ -215,133 +204,58 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo, initialNo
 
     setLoading(true);
     try {
-      const hashedInput = await hashPassword(cleanDni, cleanPass);
       const dev = await getDeviceFingerprint();
-
-      // 1. Intentar autenticación segura vía Edge Function auth-otp (sesión 15m + dispositivo confiable + OTP)
       const otpRes = await callAuthOtp({
         action: 'login_init',
         dni: cleanDni,
         correo: cleanCorreo,
-        password_hash: hashedInput,
+        password: cleanPass,
         device_hash: dev.deviceHash,
         device_label: dev.deviceLabel,
         plataforma: dev.plataforma,
       });
 
-      if (!otpRes._missingFunction) {
-        if (otpRes.error_conexion) {
-          setError(otpRes.error_conexion);
-          return;
-        }
-        if (otpRes.ok && otpRes.requires_otp && otpRes.challenge_id) {
-          resetLoginRateLimit();
-          setOtpCode('');
-          setOtpChallenge({
-            challengeId: otpRes.challenge_id,
-            maskedEmail: otpRes.masked_email || cleanCorreo,
-            proposito: 'new_device',
-            expLeft: Number(otpRes.expires_in_sec || 600),
-            resendLeft: Number(otpRes.resend_cooldown_sec || 60),
-            pendingBiometric:
-              saveBiometricOptIn && bioStatus.available
-                ? { dni: cleanDni, correo: cleanCorreo, password_hash: hashedInput }
-                : null,
-            retryPayload: {
-              action: 'login_init',
-              dni: cleanDni,
-              correo: cleanCorreo,
-              password_hash: hashedInput,
-              device_hash: dev.deviceHash,
-              device_label: dev.deviceLabel,
-              plataforma: dev.plataforma,
-            },
-          });
-          return;
-        }
-        if (otpRes.ok && otpRes.session_token && otpRes.user) {
-          resetLoginRateLimit();
-          saveSessionToken(otpRes.session_token, dev.deviceHash);
-          await maybeEnrollBiometric(otpRes.user, cleanDni, cleanCorreo, hashedInput, saveBiometricOptIn);
-          onAuthenticated(otpRes.user);
-          return;
-        }
-        const lock = recordFailedLogin(cleanDni, cleanCorreo);
-        setError(
-          lock.locked
-            ? `⏳ Cuenta protegida contra fuerza bruta. Espere ${lock.waitSeconds} s.`
-            : otpRes.error || 'Credenciales incorrectas o cuenta inexistente.'
-        );
+      if (otpRes.error_conexion) {
+        setError(otpRes.error_conexion);
         return;
       }
-
-      // 2. Respaldo RPC previo mientras se despliega la Edge Function auth-otp
-      const { data: rpcData, error: rpcErr } = await supabase.rpc('autenticar_usuario', {
-        p_dni: cleanDni,
-        p_correo: cleanCorreo,
-        p_password_hash: hashedInput,
-      });
-
-      if (rpcErr) {
-        const msg = String(rpcErr.message || '').toLowerCase();
-        const code = String(rpcErr.code || '').toUpperCase();
-        const isMissingRpc =
-          code === 'PGRST202' ||
-          code === '42883' ||
-          msg.includes('could not find the function') ||
-          msg.includes('does not exist');
-        if (!isMissingRpc) {
-          throw rpcErr;
-        }
-      }
-
-      if (!rpcErr && rpcData && typeof rpcData === 'object' && 'ok' in rpcData) {
-        if (rpcData.ok) {
-          resetLoginRateLimit();
-          onAuthenticated({
-            dni: cleanDni,
-            correo: rpcData.correo || cleanCorreo,
-            nickname: rpcData.nickname || 'Operador',
-          });
-          return;
-        }
-        const lock = recordFailedLogin(cleanDni, cleanCorreo);
-        if (lock.locked) {
-          setError(`⏳ Cuenta protegida contra fuerza bruta. Espere ${lock.waitSeconds} s.`);
-        } else {
-          setError('Credenciales incorrectas o cuenta inexistente.');
-        }
-        return;
-      }
-
-      // 2. Respaldo compatible mientras se aplica la migración SQL de RPC en Supabase
-      const { data, error: dbErr } = await supabase
-        .from('usuarios_app')
-        .select('dni, correo, nickname, password_hash')
-        .eq('dni', cleanDni)
-        .limit(1);
-
-      if (dbErr) throw dbErr;
-      const user = data?.[0];
-      const check = user
-        ? await verifyPassword(cleanDni, cleanPass, user.password_hash)
-        : { valid: false };
-
-      if (user && user.correo === cleanCorreo && check.valid) {
+      if (otpRes.ok && otpRes.requires_otp && otpRes.challenge_id) {
         resetLoginRateLimit();
-        onAuthenticated({
-          dni: cleanDni,
-          correo: user.correo,
-          nickname: user.nickname || 'Operador',
+        setOtpCode('');
+        setOtpChallenge({
+          challengeId: otpRes.challenge_id,
+          maskedEmail: otpRes.masked_email || cleanCorreo,
+          proposito: 'new_device',
+          expLeft: Number(otpRes.expires_in_sec || 600),
+          resendLeft: Number(otpRes.resend_cooldown_sec || 60),
+          enrollBiometricAfterOtp: Boolean(saveBiometricOptIn && bioStatus.available),
+          retryPayload: {
+            action: 'login_init',
+            dni: cleanDni,
+            correo: cleanCorreo,
+            password: cleanPass,
+            device_hash: dev.deviceHash,
+            device_label: dev.deviceLabel,
+            plataforma: dev.plataforma,
+          },
         });
-      } else {
-        const lock = recordFailedLogin(cleanDni, cleanCorreo);
-        if (lock.locked) {
-          setError(`⏳ Cuenta protegida contra fuerza bruta. Espere ${lock.waitSeconds} s.`);
-        } else {
-          setError('Credenciales incorrectas o cuenta inexistente.');
-        }
+        return;
       }
+      if (otpRes.ok && otpRes.session_token && otpRes.user) {
+        resetLoginRateLimit();
+        saveSessionToken(otpRes.session_token, dev.deviceHash);
+        await maybeEnrollBiometric(otpRes.user, otpRes.session_token, dev.deviceHash, saveBiometricOptIn);
+        onAuthenticated(otpRes.user);
+        return;
+      }
+      const lock = recordFailedLogin(cleanDni, cleanCorreo);
+      setError(
+        otpRes.locked
+          ? otpRes.error
+          : lock.locked
+          ? `⏳ Cuenta protegida contra fuerza bruta. Espere ${lock.waitSeconds} s.`
+          : otpRes.error || 'Credenciales incorrectas o cuenta inexistente.'
+      );
     } catch (err) {
       setError(`Error de conexión: ${err?.message || 'Verifique internet'}`);
     } finally {
@@ -363,6 +277,10 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo, initialNo
       setError('Llene todos los campos requeridos.');
       return;
     }
+    if (cleanPass.length < 8) {
+      setError('La contraseña debe tener al menos 8 caracteres.');
+      return;
+    }
     if (!aceptaPolitica) {
       setError('Debe leer y aceptar la Política de Privacidad y Términos antes de registrarse.');
       return;
@@ -379,107 +297,44 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo, initialNo
 
     setLoading(true);
     try {
-      const hashedPass = await hashPassword(cleanDni, cleanPass);
       const dev = await getDeviceFingerprint();
-
-      // 1. Intentar registro protegido con verificación OTP al correo (Edge Function auth-otp)
       const otpReg = await callAuthOtp({
         action: 'register_init',
         dni: cleanDni,
         nickname: cleanNick,
         correo: cleanCorreo,
-        password_hash: hashedPass,
+        password: cleanPass,
         device_hash: dev.deviceHash,
         device_label: dev.deviceLabel,
         plataforma: dev.plataforma,
       });
 
-      if (!otpReg._missingFunction) {
-        if (otpReg.error_conexion) {
-          setError(otpReg.error_conexion);
-          return;
-        }
-        if (otpReg.ok && otpReg.challenge_id) {
-          setOtpCode('');
-          setOtpChallenge({
-            challengeId: otpReg.challenge_id,
-            maskedEmail: otpReg.masked_email || cleanCorreo,
-            proposito: 'register',
-            expLeft: Number(otpReg.expires_in_sec || 600),
-            resendLeft: Number(otpReg.resend_cooldown_sec || 60),
-            retryPayload: {
-              action: 'register_init',
-              dni: cleanDni,
-              nickname: cleanNick,
-              correo: cleanCorreo,
-              password_hash: hashedPass,
-              device_hash: dev.deviceHash,
-              device_label: dev.deviceLabel,
-              plataforma: dev.plataforma,
-            },
-          });
-          return;
-        }
-        setError(otpReg.error || 'No se pudo iniciar la verificación de registro.');
+      if (otpReg.error_conexion) {
+        setError(otpReg.error_conexion);
         return;
       }
-
-      // 2. Respaldo RPC previo mientras se despliega auth-otp
-      const { data: rpcReg, error: rpcRegErr } = await supabase.rpc('registrar_usuario_seguro', {
-        p_dni: cleanDni,
-        p_nickname: cleanNick,
-        p_correo: cleanCorreo,
-        p_password_hash: hashedPass,
-      });
-
-      if (!rpcRegErr && rpcReg && typeof rpcReg === 'object' && 'ok' in rpcReg) {
-        if (!rpcReg.ok) {
-          setError(rpcReg.error || 'No se pudo completar el registro.');
-          return;
-        }
-        setSuccess('Cuenta registrada exitosamente. Ahora puede iniciar sesión.');
-        setMode('login');
-        setPassword('');
+      if (otpReg.ok && otpReg.challenge_id) {
+        setOtpCode('');
+        setOtpChallenge({
+          challengeId: otpReg.challenge_id,
+          maskedEmail: otpReg.masked_email || cleanCorreo,
+          proposito: 'register',
+          expLeft: Number(otpReg.expires_in_sec || 600),
+          resendLeft: Number(otpReg.resend_cooldown_sec || 60),
+          retryPayload: {
+            action: 'register_init',
+            dni: cleanDni,
+            nickname: cleanNick,
+            correo: cleanCorreo,
+            password: cleanPass,
+            device_hash: dev.deviceHash,
+            device_label: dev.deviceLabel,
+            plataforma: dev.plataforma,
+          },
+        });
         return;
       }
-
-      // 2. Respaldo compatible mientras se aplica la migración SQL de RPC en Supabase
-      const { data: padron, error: errPadron } = await supabase
-        .from('padron_oficial')
-        .select('dni, nombres_completos, carrera')
-        .eq('dni', cleanDni)
-        .limit(1);
-
-      if (errPadron) throw errPadron;
-      if (!padron || padron.length === 0) {
-        setError('El DNI no figura en el padrón oficial público UNMSM.');
-        return;
-      }
-
-      const { data: existing, error: errEx } = await supabase
-        .from('usuarios_app')
-        .select('dni')
-        .eq('dni', cleanDni)
-        .limit(1);
-
-      if (errEx) throw errEx;
-      if (existing && existing.length > 0) {
-        setError('Este DNI ya tiene una cuenta registrada. Inicie sesión.');
-        return;
-      }
-
-      const { error: errIns } = await supabase.from('usuarios_app').insert({
-        dni: cleanDni,
-        correo: cleanCorreo,
-        password_hash: hashedPass,
-        nickname: cleanNick,
-      });
-
-      if (errIns) throw errIns;
-
-      setSuccess('Cuenta registrada exitosamente. Ahora puede iniciar sesión.');
-      setMode('login');
-      setPassword('');
+      setError(otpReg.error || 'No se pudo iniciar la verificación de registro.');
     } catch (err) {
       setError(`Error al registrar: ${err?.message || 'Intente nuevamente'}`);
     } finally {
@@ -562,12 +417,11 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo, initialNo
       setLoading(true);
       try {
         const dev = await getDeviceFingerprint();
-        const newHash = await hashPassword(otpChallenge.dni, p1);
         const res = await callAuthOtp({
           action: 'password_reset_verify',
           challenge_id: otpChallenge.challengeId,
           code: cleanCode,
-          new_password_hash: newHash,
+          new_password: p1,
           device_hash: dev.deviceHash,
         });
         if (res.ok) {
@@ -604,9 +458,8 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo, initialNo
       });
       if (res.ok && res.session_token && res.user) {
         saveSessionToken(res.session_token, dev.deviceHash);
-        const pb = otpChallenge.pendingBiometric;
-        if (pb) {
-          await maybeEnrollBiometric(res.user, pb.dni, pb.correo, pb.password_hash, true);
+        if (otpChallenge.enrollBiometricAfterOtp) {
+          await maybeEnrollBiometric(res.user, res.session_token, dev.deviceHash, true);
         }
         setOtpChallenge(null);
         onAuthenticated(res.user);

@@ -1,6 +1,6 @@
 /**
  * biometric.js — Puente JavaScript hacia BiometricAuthPlugin nativo de Android.
- * En Web/Escritorio responde de forma segura { available: false } sin errores.
+ * Almacena únicamente tokens biométricos rotativos de un solo uso (nunca contraseñas).
  */
 
 import { Capacitor, registerPlugin } from '@capacitor/core';
@@ -33,19 +33,31 @@ export async function getBiometricStatus() {
   }
 }
 
-export async function enableBiometricLogin({ dni, correo, password_hash, nickname }) {
+export async function enableBiometricLogin({ dni, biometric_token, nickname }) {
   if (!isNativeAndroid()) {
     return { ok: false, error: 'Solo disponible en la aplicación Android.' };
   }
   try {
     return await BiometricAuth.enableBiometric({
       dni: String(dni || '').trim(),
-      correo: String(correo || '').trim(),
-      password_hash: String(password_hash || '').trim(),
+      biometric_token: String(biometric_token || '').trim(),
       nickname: String(nickname || 'Operador').trim(),
     });
   } catch (err) {
     return { ok: false, error: err?.message || 'No se pudo activar la huella digital.' };
+  }
+}
+
+export async function rotateBiometricToken({ dni, biometric_token, nickname }) {
+  if (!isNativeAndroid()) return { ok: false };
+  try {
+    return await BiometricAuth.rotateToken({
+      dni: String(dni || '').trim(),
+      biometric_token: String(biometric_token || '').trim(),
+      nickname: String(nickname || 'Operador').trim(),
+    });
+  } catch {
+    return { ok: false };
   }
 }
 

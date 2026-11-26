@@ -1,5 +1,4 @@
-import { supabase } from '../supabaseClient';
-import { generateSecureTicketId } from './security';
+import { generateSecureTicketId, loadSessionToken, callAuthOtp } from './security';
 
 /**
  * Registra automáticamente un reporte global completo de diagnóstico/escaneo/test móvil
@@ -118,8 +117,16 @@ export async function recordMobileEvent({
   };
 
   try {
-    const { error } = await supabase.from('reportes_diagnostico').upsert(
-      {
+    const saved = loadSessionToken();
+    if (!saved) {
+      console.warn('[cloudHistory] Sesión activa requerida para guardar ticket.');
+      return null;
+    }
+    const res = await callAuthOtp({
+      action: 'tickets_upsert',
+      session_token: saved.token,
+      device_hash: saved.deviceHash,
+      ticket: {
         id_ticket: ticketId,
         cpu: cpuLabel,
         ram: ramLabel,
@@ -129,16 +136,15 @@ export async function recordMobileEvent({
         refrigeracion: batteryLabel,
         health_score: Math.max(0, Math.min(100, Math.round(healthScore))),
         diagnostico: diagnostico || `${tipoEvento} — ${boardLabel}`,
-        solucion: solucion || 'Evento registrado automáticamente en el historial privado de la cuenta.',
+        solucion: solucion || 'Evento registrado en el historial privado de la cuenta.',
         specs_json: specsJson,
       },
-      { onConflict: 'id_ticket' }
-    );
-    if (error) {
-      console.warn('[cloudHistory] Error registrando evento:', error.message);
+    });
+    if (!res?.ok) {
+      console.warn('[cloudHistory] Error registrando evento:', res?.error || res?.error_conexion);
       return null;
     }
-    return ticketId;
+    return res.id_ticket || ticketId;
   } catch {
     return null;
   }

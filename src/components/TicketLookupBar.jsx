@@ -4,11 +4,12 @@
  */
 
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { supabase } from '../supabaseClient';
 import {
   isHoneyTicket,
   triggerHoneytokenAlert,
   fetchHoneytokenAlerts,
+  loadSessionToken,
+  callAuthOtp,
 } from '../utils/security';
 import {
   Search, Laptop, Monitor, Smartphone, ArrowRight, RefreshCw, Lock, LogIn,
@@ -91,17 +92,22 @@ export default function TicketLookupBar({ user, onSelectTicket, onRequestLogin }
     }
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('reportes_diagnostico')
-        .select('id_ticket, cpu, placa_base, health_score, diagnostico, fecha_creacion, specs_json')
-        .eq('specs_json->>owner_dni', ownerDni)
-        .order('fecha_creacion', { ascending: false })
-        .limit(120);
-      if (error) {
-        console.warn('[TicketLookupBar] Error consultando tickets privados:', error.message);
+      const saved = loadSessionToken();
+      if (!saved) {
+        setRecent([]);
+        return;
+      }
+      const res = await callAuthOtp({
+        action: 'tickets_list',
+        session_token: saved.token,
+        device_hash: saved.deviceHash,
+        limit: 120,
+      });
+      if (!res?.ok) {
+        console.warn('[TicketLookupBar] Error consultando tickets privados:', res?.error || res?.error_conexion);
         setRecent([]);
       } else {
-        setRecent(data || []);
+        setRecent(Array.isArray(res.tickets) ? res.tickets : []);
       }
     } catch {
       setRecent([]);

@@ -368,25 +368,15 @@ export default function App() {
     }
 
     try {
-      let { data, error } = await supabase
-        .from('reportes_diagnostico')
-        .select('*')
-        .eq('id_ticket', ticketParam)
-        .single();
-
-      if ((error || !data) && ticketParam) {
+      let res = await callAuthOtp({ action: 'ticket_get_public', ticket_id: ticketParam });
+      if (!res?.ok && ticketParam) {
         await new Promise((r) => setTimeout(r, 1200));
-        const retry = await supabase
-          .from('reportes_diagnostico')
-          .select('*')
-          .eq('id_ticket', ticketParam)
-          .single();
-        data = retry.data;
-        error = retry.error;
+        res = await callAuthOtp({ action: 'ticket_get_public', ticket_id: ticketParam });
       }
+      const data = res?.ok ? res.ticket : null;
 
-      if (error || !data) {
-        setStatusMessage(`[${error ? 'Error al consultar ticket' : 'Ticket no encontrado'}]`);
+      if (!data) {
+        setStatusMessage(`[${res?.error_conexion ? 'Error al consultar ticket' : 'Ticket no encontrado'}]`);
         setTelemetry({ ...FALLBACK, id_ticket: ticketParam, ticket_id: ticketParam });
         setIsLive(false);
         return;

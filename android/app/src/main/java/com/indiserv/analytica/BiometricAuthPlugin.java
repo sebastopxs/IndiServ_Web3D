@@ -31,16 +31,16 @@ import javax.crypto.spec.GCMParameterSpec;
 
 /**
  * BiometricAuthPlugin — Autenticación biométrica nativa Android (huella digital)
- * con bóveda cifrada AES-256-GCM en AndroidKeyStore.
+ * con bóveda cifrada AES-256-GCM en AndroidKeyStore y tokens rotativos de un solo uso.
  *
- * Nunca almacena contraseñas en texto plano: cifra únicamente el hash derivado
- * (indiserv_v1$...) y exige verificación biométrica del sistema antes de guardar o descifrar.
+ * Nunca almacena contraseñas ni password_hash: guarda únicamente un token biométrico
+ * opaco emitido por auth-otp, ligado al device_hash y rotado en cada inicio de sesión.
  */
 @CapacitorPlugin(name = "BiometricAuth")
 public class BiometricAuthPlugin extends Plugin {
-    private static final String KEY_ALIAS = "indiserv_biometric_aes_v1";
+    private static final String KEY_ALIAS = "indiserv_biometric_aes_v2";
     private static final String KEYSTORE_PROVIDER = "AndroidKeyStore";
-    private static final String PREFS_NAME = "indiserv_biometric_vault_v1";
+    private static final String PREFS_NAME = "indiserv_biometric_vault_v2";
     private static final String KEY_ENC_PAYLOAD = "enc_payload";
     private static final String KEY_ENC_IV = "enc_iv";
     private static final String KEY_META_NICK = "meta_nickname";
@@ -74,11 +74,10 @@ public class BiometricAuthPlugin extends Plugin {
         return keyGen.generateKey();
     }
 
-    private void encryptAndStore(String dni, String correo, String passwordHash, String nickname) throws Exception {
+    private void encryptAndStore(String dni, String biometricToken, String nickname) throws Exception {
         JSONObject payload = new JSONObject();
         payload.put("dni", dni);
-        payload.put("correo", correo);
-        payload.put("password_hash", passwordHash);
+        payload.put("biometric_token", biometricToken);
         payload.put("nickname", nickname);
 
         SecretKey key = getOrCreateSecretKey();
@@ -116,6 +115,9 @@ public class BiometricAuthPlugin extends Plugin {
 
     private void clearVault() {
         getVaultPrefs().edit().clear().apply();
+        // Limpiar también cualquier bóveda v1 previa
+        getContext().getSharedPreferences("indiserv_biometric_vault_v1", Context.MODE_PRIVATE)
+            .edit().clear().apply();
     }
 
     @PluginMethod
@@ -153,14 +155,13 @@ public class BiometricAuthPlugin extends Plugin {
     @PluginMethod
     public void enableBiometric(PluginCall call) {
         String dni = call.getString("dni", "").trim();
-        String correo = call.getString("correo", "").trim();
-        String passwordHash = call.getString("password_hash", "").trim();
+        String biometricToken = call.getString("biometric_token", "").trim();
         String nickname = call.getString("nickname", "Operador").trim();
 
-        if (dni.length() < 8 || !correo.contains("@") || !passwordHash.startsWith("indiserv_v1$")) {
+        if (dni.length() < 8 || biometricToken.length() < 32) {
             JSObject err = new JSObject();
             err.put("ok", false);
-            err.put("error", "Credenciales incompletas para activar huella digital.");
+            err.put("error", "Token biométrico inválido para vincular huella.");
             call.resolve(err);
             return;
         }
@@ -193,11 +194,12 @@ public class BiometricAuthPlugin extends Plugin {
                     public void onAuthenticationSucceeded(@NonNull BiometricPrompt.AuthenticationResult result) {
                         if (!settled.compareAndSet(false, true)) return;
                         try {
-                            encryptAndStore(dni, correo, passwordHash, nickname.isEmpty() ? "Operador" : nickname);
+                            String safeNick = nickname.isEmpty() ? "Operador" : nickname;
+                            encryptAndStore(dni, biometricToken, safeNick);
                             String dniMask = dni.length() >= 4 ? "••••" + dni.substring(dni.length() - 4) : dni;
                             JSObject ret = new JSObject();
                             ret.put("ok", true);
-                            ret.put("nickname", nickname.isEmpty() ? "Operador" : nickname);
+                            ret.put("nickname", safeNick);
                             ret.put("dniMask", dniMask);
                             call.resolve(ret);
                         } catch (Exception ex) {
@@ -223,13 +225,36 @@ public class BiometricAuthPlugin extends Plugin {
 
             BiometricPrompt.PromptInfo info = new BiometricPrompt.PromptInfo.Builder()
                 .setTitle("Activar acceso con huella")
-                .setSubtitle("Confirma tu huella digital para guardar tu sesión en este teléfono")
+                .setSubtitle("Confirma tu huella digital para vincular este teléfono")
                 .setNegativeButtonText("Cancelar")
                 .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_WEAK)
                 .build();
 
             prompt.authenticate(info);
         });
+    }
+
+    @PluginMethod
+    public void rotateToken(PluginCall call) {
+        String dni = call.getString("dni", "").trim();
+        String biometricToken = call.getString("biometric_token", "").trim();
+        String nickname = call.getString("nickname", "Operador").trim();
+        if (dni.length() < 8 || biometricToken.length() < 32) {
+            JSObject err = new JSObject();
+            err.put("ok", false);
+            call.resolve(err);
+            return;
+        }
+        try {
+            encryptAndStore(dni, biometricToken, nickname.isEmpty() ? "Operador" : nickname);
+            JSObject ret = new JSObject();
+            ret.put("ok", true);
+            call.resolve(ret);
+        } catch (Exception ex) {
+            JSObject err = new JSObject();
+            err.put("ok", false);
+            call.resolve(err);
+        }
     }
 
     @PluginMethod
@@ -264,18 +289,19 @@ public class BiometricAuthPlugin extends Plugin {
                         if (!settled.compareAndSet(false, true)) return;
                         try {
                             JSONObject data = decryptStored();
-                            if (data == null) {
+                            if (data == null || data.optString("biometric_token", "").isEmpty()) {
+                                clearVault();
                                 JSObject ret = new JSObject();
                                 ret.put("ok", false);
-                                ret.put("error", "No se encontraron credenciales guardadas.");
+                                ret.put("invalidated", true);
+                                ret.put("error", "Token biométrico obsoleto. Inicia sesión con contraseña para reactivarlo.");
                                 call.resolve(ret);
                                 return;
                             }
                             JSObject ret = new JSObject();
                             ret.put("ok", true);
                             ret.put("dni", data.optString("dni", ""));
-                            ret.put("correo", data.optString("correo", ""));
-                            ret.put("password_hash", data.optString("password_hash", ""));
+                            ret.put("biometric_token", data.optString("biometric_token", ""));
                             ret.put("nickname", data.optString("nickname", "Operador"));
                             call.resolve(ret);
                         } catch (Exception ex) {
