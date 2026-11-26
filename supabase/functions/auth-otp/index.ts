@@ -1,14 +1,22 @@
 /**
  * Supabase Edge Function: auth-otp
  * ============================================================================
- * Orquestador único de autenticación segura de IndiServ Analytica:
- *  - register_init     : Valida padrón UNMSM + envía OTP 6 dígitos vía Brevo
- *  - register_verify   : Consumo atómico FOR UPDATE + crea cuenta + dispositivo + sesión 15m
- *  - login_init        : Valida credenciales; si dispositivo confiable -> sesión 15m;
- *                        si dispositivo nuevo -> envía OTP al correo registrado
- *  - login_verify_otp  : Verifica OTP atómico + registra dispositivo confiable + sesión 15m
- *  - session_validate  : Valida token opaco 256-bit ligado a device_hash (reloj PostgreSQL)
- *  - session_logout    : Revoca sesión inmediatamente en PostgreSQL
+ * Orquestador único de autenticación y cuenta segura de IndiServ Analytica:
+ *  - register_init          : Valida padrón UNMSM + envía OTP 6 dígitos vía Brevo
+ *  - register_verify        : Consumo atómico FOR UPDATE + crea cuenta + dispositivo + sesión 15m
+ *  - login_init             : Valida credenciales; si dispositivo confiable -> sesión 15m;
+ *                             si dispositivo nuevo -> envía OTP al correo registrado
+ *  - login_verify_otp       : Verifica OTP atómico + registra dispositivo confiable + sesión 15m
+ *  - session_validate       : Valida token opaco 256-bit ligado a device_hash (reloj PostgreSQL)
+ *  - session_logout         : Revoca sesión inmediatamente en PostgreSQL
+ *  - profile_get            : Consulta perfil activo (avatar, dispositivos, tickets)
+ *  - profile_update_avatar  : Valida magic bytes (PNG/JPEG/WebP <= 75 KB) y guarda avatar
+ *  - password_change_init   : Valida contraseña actual en sesión + envía OTP Brevo
+ *  - password_change_verify : Consume OTP + actualiza contraseña + revoca otras sesiones + alerta
+ *  - password_reset_init    : Recuperación desde Login (DNI + correo + anti-enumeración + OTP Brevo)
+ *  - password_reset_verify  : Consume OTP + nueva clave + revoca 100% sesiones y dispositivos + alerta
+ *  - account_delete_init    : Valida clave actual + confirmación + envía OTP de borrado total
+ *  - account_delete_verify  : Consume OTP + borrado atómico en cascada (cuenta + tickets + sesiones)
  *
  * Secretos requeridos en Supabase Edge Functions -> Secrets:
  *   BREVO_API_KEY       : API Key v3 de Brevo (plan gratuito 300/día, 300/hora)
@@ -36,6 +44,8 @@ const MAX_REQ_PER_IP_MIN = 30;
 const MAX_OTP_PER_HOUR_DNI = 5;
 const OTP_RESEND_COOLDOWN_SEC = 60;
 const MAX_BODY_BYTES = 8 * 1024;
+const MAX_AVATAR_BODY_BYTES = 120 * 1024;
+const MAX_AVATAR_DECODED_BYTES = 75_000;
 
 const HONEY_DNIS = new Set(["00000000", "99999999", "12345678", "87654321", "11111111", "admin", "root"]);
 const HONEY_EMAILS = new Set([
@@ -178,11 +188,96 @@ async function logHoneyAlert(
   }
 }
 
-async function sendBrevoOtpEmail(params: {
+type OtpPurpose = "register" | "new_device" | "password_change" | "password_reset" | "account_delete";
+
+function validateAvatarDataUri(raw: unknown): { ok: boolean; value?: string | null; error?: string } {
+  if (raw === null || raw === undefined) return { ok: true, value: null };
+  const str = String(raw).trim();
+  if (!str) return { ok: true, value: null };
+
+  const match = /^data:image\/(webp|jpeg|png);base64,([A-Za-z0-9+/=]+)$/.exec(str);
+  if (!match) {
+    return { ok: false, error: "Formato de imagen no permitido. Use PNG, JPEG o WebP." };
+  }
+  const kind = match[1];
+  const b64 = match[2];
+  const approxBytes = Math.floor((b64.length * 3) / 4);
+  if (approxBytes <= 0 || approxBytes > MAX_AVATAR_DECODED_BYTES) {
+    return { ok: false, error: "La imagen supera el límite seguro de 75 KB tras compresión." };
+  }
+
+  let bytes: Uint8Array;
+  try {
+    const bin = atob(b64);
+    if (bin.length < 12 || bin.length > MAX_AVATAR_DECODED_BYTES) {
+      return { ok: false, error: "Tamaño de imagen fuera de rango permitido." };
+    }
+    bytes = new Uint8Array(Math.min(bin.length, 16));
+    for (let i = 0; i < bytes.length; i++) bytes[i] = bin.charCodeAt(i);
+  } catch {
+    return { ok: false, error: "Base64 de imagen inválido." };
+  }
+
+  const isPng =
+    bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47 &&
+    bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a;
+  const isJpeg = bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  const isWebp =
+    bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+    bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50;
+
+  if (
+    (kind === "png" && !isPng) ||
+    (kind === "jpeg" && !isJpeg) ||
+    (kind === "webp" && !isWebp)
+  ) {
+    return { ok: false, error: "La firma binaria (magic bytes) no coincide con una imagen válida." };
+  }
+
+  return { ok: true, value: str };
+}
+
+async function requireActiveSession(
+  // deno-lint-ignore no-explicit-any
+  admin: any,
+  // deno-lint-ignore no-explicit-any
+  body: any
+): Promise<
+  | {
+      ok: true;
+      dni: string;
+      correo: string;
+      nickname: string;
+      avatar_data: string | null;
+      tokenHash: string;
+      deviceHash: string;
+    }
+  | { ok: false }
+> {
+  const token = String(body?.session_token || "").trim();
+  const deviceHash = String(body?.device_hash || "").trim();
+  if (!token || !isValidDeviceHash(deviceHash)) return { ok: false };
+  const tokenHash = await sha256Hex(token);
+  const { data, error } = await admin.rpc("validar_sesion_15m", {
+    p_token_hash: tokenHash,
+    p_device_hash: deviceHash,
+  });
+  if (error || !data?.ok) return { ok: false };
+  return {
+    ok: true,
+    dni: String(data.dni).trim(),
+    correo: String(data.correo).trim(),
+    nickname: String(data.nickname || "Operador").trim(),
+    avatar_data: data.avatar_data || null,
+    tokenHash,
+    deviceHash,
+  };
+}
+
+async function sendBrevoHtmlEmail(params: {
   toEmail: string;
-  code: string;
-  proposito: "register" | "new_device";
-  deviceLabel: string;
+  subject: string;
+  htmlContent: string;
 }): Promise<{ ok: boolean; error?: string }> {
   const apiKey = Deno.env.get("BREVO_API_KEY")?.trim();
   const senderEmail = Deno.env.get("BREVO_SENDER_EMAIL")?.trim();
@@ -192,35 +287,6 @@ async function sendBrevoOtpEmail(params: {
       error: "Servicio de correo no configurado en el servidor (BREVO_API_KEY / BREVO_SENDER_EMAIL).",
     };
   }
-
-  const isReg = params.proposito === "register";
-  const subject = isReg
-    ? `IndiServ Analytica — Código de verificación de registro: ${params.code}`
-    : `IndiServ Analytica — Código de acceso en nuevo dispositivo: ${params.code}`;
-
-  const heading = isReg
-    ? "Confirma tu registro en IndiServ Analytica"
-    : "Nuevo inicio de sesión detectado";
-
-  const intro = isReg
-    ? "Ingresa este código de 6 dígitos para verificar tu correo y activar tu cuenta:"
-    : `Detectamos un intento de inicio de sesión desde un dispositivo nuevo (<strong>${params.deviceLabel.replace(/[<>&]/g, "")}</strong>). Si fuiste tú, ingresa este código para marcarlo como confiable:`;
-
-  const htmlContent = `
-    <div style="font-family:Segoe UI,Arial,sans-serif;background:#090c12;color:#e2e8f0;padding:28px;border-radius:12px;max-width:520px;margin:0 auto;">
-      <p style="color:#34d399;font-size:12px;letter-spacing:1.5px;text-transform:uppercase;margin:0 0 8px 0;">INDISERV ANALYTICA · SEGURIDAD</p>
-      <h2 style="color:#ffffff;margin:0 0 12px 0;font-size:20px;">${heading}</h2>
-      <p style="color:#cbd5e1;font-size:14px;line-height:1.5;margin:0 0 20px 0;">${intro}</p>
-      <div style="background:#101521;border:1px solid #34d39955;border-radius:10px;padding:18px;text-align:center;margin-bottom:20px;">
-        <span style="font-family:Consolas,monospace;font-size:32px;font-weight:700;letter-spacing:8px;color:#34d399;">${params.code}</span>
-      </div>
-      <p style="color:#94a3b8;font-size:12px;line-height:1.5;margin:0;">
-        Este código expira en <strong>10 minutos</strong> y permite un máximo de <strong>5 intentos</strong>.
-        Nunca compartas este código. Si no solicitaste este acceso, cambia tu contraseña de inmediato.
-      </p>
-    </div>
-  `;
-
   try {
     const resp = await fetch("https://api.brevo.com/v3/smtp/email", {
       method: "POST",
@@ -232,8 +298,8 @@ async function sendBrevoOtpEmail(params: {
       body: JSON.stringify({
         sender: { name: "IndiServ Analytica", email: senderEmail },
         to: [{ email: params.toEmail }],
-        subject,
-        htmlContent,
+        subject: params.subject,
+        htmlContent: params.htmlContent,
       }),
     });
 
@@ -247,6 +313,89 @@ async function sendBrevoOtpEmail(params: {
     console.error("[auth-otp] Brevo fetch exception:", err);
     return { ok: false, error: "Error de red al contactar el servicio de correo." };
   }
+}
+
+async function sendBrevoOtpEmail(params: {
+  toEmail: string;
+  code: string;
+  proposito: OtpPurpose;
+  deviceLabel: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const safeDev = params.deviceLabel.replace(/[<>&]/g, "");
+  const copyMap: Record<OtpPurpose, { subject: string; heading: string; intro: string; accent: string }> = {
+    register: {
+      subject: `IndiServ Analytica — Código de verificación de registro: ${params.code}`,
+      heading: "Confirma tu registro en IndiServ Analytica",
+      intro: "Ingresa este código de 6 dígitos para verificar tu correo y activar tu cuenta:",
+      accent: "#34d399",
+    },
+    new_device: {
+      subject: `IndiServ Analytica — Código de acceso en nuevo dispositivo: ${params.code}`,
+      heading: "Nuevo inicio de sesión detectado",
+      intro: `Detectamos un intento de inicio de sesión desde un dispositivo nuevo (<strong>${safeDev}</strong>). Si fuiste tú, ingresa este código para marcarlo como confiable:`,
+      accent: "#22d3ee",
+    },
+    password_change: {
+      subject: `IndiServ Analytica — Código para cambiar tu contraseña: ${params.code}`,
+      heading: "Confirmación de cambio de contraseña",
+      intro: `Solicitaste cambiar la contraseña de tu cuenta desde <strong>${safeDev}</strong>. Ingresa este código de 6 dígitos para confirmar el cambio:`,
+      accent: "#34d399",
+    },
+    password_reset: {
+      subject: `IndiServ Analytica — Código de recuperación de contraseña: ${params.code}`,
+      heading: "Recuperación de contraseña solicitada",
+      intro: `Recibimos una solicitud para restablecer tu contraseña desde <strong>${safeDev}</strong>. Si fuiste tú, ingresa este código para definir una nueva contraseña:`,
+      accent: "#f59e0b",
+    },
+    account_delete: {
+      subject: `IndiServ Analytica — Código IRREVERSIBLE de eliminación de cuenta: ${params.code}`,
+      heading: "⚠️ Confirmación de eliminación permanente de cuenta",
+      intro: `Solicitaste <strong>eliminar permanentemente</strong> tu cuenta, tu perfil y <strong>todos tus tickets de diagnóstico</strong> desde <strong>${safeDev}</strong>. Esta acción no se puede deshacer:`,
+      accent: "#ef4444",
+    },
+  };
+
+  const c = copyMap[params.proposito];
+  const htmlContent = `
+    <div style="font-family:Segoe UI,Arial,sans-serif;background:#090c12;color:#e2e8f0;padding:28px;border-radius:12px;max-width:520px;margin:0 auto;">
+      <p style="color:${c.accent};font-size:12px;letter-spacing:1.5px;text-transform:uppercase;margin:0 0 8px 0;">INDISERV ANALYTICA · SEGURIDAD</p>
+      <h2 style="color:#ffffff;margin:0 0 12px 0;font-size:20px;">${c.heading}</h2>
+      <p style="color:#cbd5e1;font-size:14px;line-height:1.5;margin:0 0 20px 0;">${c.intro}</p>
+      <div style="background:#101521;border:1px solid ${c.accent}55;border-radius:10px;padding:18px;text-align:center;margin-bottom:20px;">
+        <span style="font-family:Consolas,monospace;font-size:32px;font-weight:700;letter-spacing:8px;color:${c.accent};">${params.code}</span>
+      </div>
+      <p style="color:#94a3b8;font-size:12px;line-height:1.5;margin:0;">
+        Este código expira en <strong>10 minutos</strong> y permite un máximo de <strong>5 intentos</strong>.
+        Nunca compartas este código. Si no realizaste esta solicitud, ignora este mensaje y revisa la seguridad de tu cuenta.
+      </p>
+    </div>
+  `;
+
+  return sendBrevoHtmlEmail({ toEmail: params.toEmail, subject: c.subject, htmlContent });
+}
+
+async function sendBrevoSecurityNotice(params: {
+  toEmail: string;
+  titulo: string;
+  detalle: string;
+  accent?: string;
+}): Promise<void> {
+  const accent = params.accent || "#22d3ee";
+  const htmlContent = `
+    <div style="font-family:Segoe UI,Arial,sans-serif;background:#090c12;color:#e2e8f0;padding:28px;border-radius:12px;max-width:520px;margin:0 auto;">
+      <p style="color:${accent};font-size:12px;letter-spacing:1.5px;text-transform:uppercase;margin:0 0 8px 0;">INDISERV ANALYTICA · ALERTA DE SEGURIDAD</p>
+      <h2 style="color:#ffffff;margin:0 0 12px 0;font-size:20px;">${params.titulo}</h2>
+      <p style="color:#cbd5e1;font-size:14px;line-height:1.5;margin:0 0 16px 0;">${params.detalle}</p>
+      <p style="color:#94a3b8;font-size:12px;line-height:1.5;margin:0;">
+        Fecha UTC: ${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC.
+      </p>
+    </div>
+  `;
+  await sendBrevoHtmlEmail({
+    toEmail: params.toEmail,
+    subject: `IndiServ Analytica — ${params.titulo}`,
+    htmlContent,
+  }).catch(() => {});
 }
 
 async function checkDniOtpLimits(
@@ -317,7 +466,7 @@ Deno.serve(async (req: Request) => {
   }
 
   const rawText = await req.text();
-  if (rawText.length > MAX_BODY_BYTES) {
+  if (rawText.length > MAX_AVATAR_BODY_BYTES) {
     return new Response(JSON.stringify({ ok: false, error: "Payload demasiado grande." }), {
       status: 413,
       headers: { ...cors, "Content-Type": "application/json" },
@@ -331,6 +480,14 @@ Deno.serve(async (req: Request) => {
   } catch {
     return new Response(JSON.stringify({ ok: false, error: "JSON inválido." }), {
       status: 400,
+      headers: { ...cors, "Content-Type": "application/json" },
+    });
+  }
+
+  const action = String(body?.action || "").trim();
+  if (action !== "profile_update_avatar" && rawText.length > MAX_BODY_BYTES) {
+    return new Response(JSON.stringify({ ok: false, error: "Payload demasiado grande." }), {
+      status: 413,
       headers: { ...cors, "Content-Type": "application/json" },
     });
   }
@@ -350,7 +507,6 @@ Deno.serve(async (req: Request) => {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-  const action = String(body?.action || "").trim();
   const json = (data: unknown, status = 200) =>
     new Response(JSON.stringify(data), {
       status,
@@ -375,7 +531,12 @@ Deno.serve(async (req: Request) => {
       if (error || !data?.ok) return json({ ok: false });
       return json({
         ok: true,
-        user: { dni: data.dni, correo: data.correo, nickname: data.nickname },
+        user: {
+          dni: data.dni,
+          correo: data.correo,
+          nickname: data.nickname,
+          avatar_data: data.avatar_data || null,
+        },
         expires_at: data.expira_en,
         remaining_sec: data.remaining_sec,
       });
@@ -395,6 +556,55 @@ Deno.serve(async (req: Request) => {
         });
       }
       return json({ ok: true });
+    }
+
+    // -------------------------------------------------------------------------
+    // 2B. PROFILE GET (Consulta perfil, avatar y conteo de dispositivos/tickets)
+    // -------------------------------------------------------------------------
+    if (action === "profile_get") {
+      const sess = await requireActiveSession(admin, body);
+      if (!sess.ok) {
+        return json({ ok: false, session_expired: true, error: "Sesión expirada. Vuelva a iniciar sesión." }, 401);
+      }
+      const { data: prof, error: profErr } = await admin.rpc("obtener_perfil_cuenta", {
+        p_dni: sess.dni,
+      });
+      if (profErr || !prof?.ok) {
+        return json({ ok: false, error: prof?.error || "No se pudo cargar el perfil." }, 500);
+      }
+      return json({
+        ok: true,
+        user: {
+          dni: prof.dni,
+          correo: prof.correo,
+          nickname: prof.nickname,
+          avatar_data: prof.avatar_data || null,
+          dispositivos_confiables: prof.dispositivos_confiables ?? 0,
+          tickets_count: prof.tickets_count ?? 0,
+        },
+      });
+    }
+
+    // -------------------------------------------------------------------------
+    // 2C. PROFILE UPDATE AVATAR (Valida magic bytes PNG/JPEG/WebP <= 75 KB)
+    // -------------------------------------------------------------------------
+    if (action === "profile_update_avatar") {
+      const sess = await requireActiveSession(admin, body);
+      if (!sess.ok) {
+        return json({ ok: false, session_expired: true, error: "Sesión expirada. Vuelva a iniciar sesión." }, 401);
+      }
+      const check = validateAvatarDataUri(body?.avatar_data);
+      if (!check.ok) {
+        return json({ ok: false, error: check.error }, 400);
+      }
+      const { data: upd, error: updErr } = await admin.rpc("actualizar_avatar_usuario", {
+        p_dni: sess.dni,
+        p_avatar_data: check.value ?? null,
+      });
+      if (updErr || !upd?.ok) {
+        return json({ ok: false, error: upd?.error || "No se pudo actualizar la foto de perfil." }, 500);
+      }
+      return json({ ok: true, avatar_data: upd.avatar_data || null });
     }
 
     if (!otpPepper || otpPepper.length < 16) {
@@ -646,12 +856,22 @@ Deno.serve(async (req: Request) => {
           p_device_hash: deviceHash,
           p_token_hash: tokenHash,
         });
+        const { data: avRow } = await admin
+          .from("usuarios_app")
+          .select("avatar_data")
+          .eq("dni", verifiedDni)
+          .maybeSingle();
         return json({
           ok: true,
           requires_otp: false,
           session_token: sessionToken,
           expires_at: sess?.expira_en,
-          user: { dni: verifiedDni, correo: verifiedCorreo, nickname: verifiedNick },
+          user: {
+            dni: verifiedDni,
+            correo: verifiedCorreo,
+            nickname: verifiedNick,
+            avatar_data: avRow?.avatar_data || null,
+          },
         });
       }
 
@@ -784,6 +1004,11 @@ Deno.serve(async (req: Request) => {
         p_device_hash: deviceHash,
         p_token_hash: tokenHash,
       });
+      const { data: avRow } = await admin
+        .from("usuarios_app")
+        .select("avatar_data")
+        .eq("dni", res.dni)
+        .maybeSingle();
 
       return json({
         ok: true,
@@ -793,7 +1018,459 @@ Deno.serve(async (req: Request) => {
           dni: res.dni,
           correo: res.correo,
           nickname: res.payload_pendiente?.nickname || "Operador",
+          avatar_data: avRow?.avatar_data || null,
         },
+      });
+    }
+
+    // -------------------------------------------------------------------------
+    // 7. PASSWORD CHANGE INIT (Dentro de Mi Cuenta: clave actual + OTP Brevo)
+    // -------------------------------------------------------------------------
+    if (action === "password_change_init") {
+      const sess = await requireActiveSession(admin, body);
+      if (!sess.ok) {
+        return json({ ok: false, session_expired: true, error: "Sesión expirada. Vuelva a iniciar sesión." }, 401);
+      }
+      const currentHash = String(body?.current_password_hash || "").trim();
+      const newHash = String(body?.new_password_hash || "").trim();
+      const deviceLabel = String(body?.device_label || "Dispositivo").trim().slice(0, 80);
+
+      if (!currentHash || !newHash.startsWith("indiserv_v1$")) {
+        return json({ ok: false, error: "Complete la contraseña actual y una nueva contraseña válida." }, 400);
+      }
+      if (currentHash === newHash) {
+        return json({ ok: false, error: "La nueva contraseña debe ser diferente a la actual." }, 400);
+      }
+
+      const { data: authCheck, error: authErr } = await admin.rpc("autenticar_usuario", {
+        p_dni: sess.dni,
+        p_correo: sess.correo,
+        p_password_hash: currentHash,
+      });
+      if (authErr || !authCheck?.ok) {
+        return json({ ok: false, error: "La contraseña actual es incorrecta." });
+      }
+
+      const lim = await checkDniOtpLimits(admin, sess.dni);
+      if (!lim.allowed) {
+        return json({ ok: false, error: lim.error, wait_sec: lim.waitSec || 0 }, 429);
+      }
+
+      await admin
+        .from("codigos_otp")
+        .update({ usado: true })
+        .eq("dni", sess.dni)
+        .eq("proposito", "password_change")
+        .eq("usado", false);
+
+      const challengeId = crypto.randomUUID();
+      const code = generateOtp6();
+      const codeHmac = await computeOtpHmac(otpPepper, challengeId, sess.dni, "password_change", code);
+
+      const { error: insErr } = await admin.from("codigos_otp").insert({
+        id: challengeId,
+        dni: sess.dni,
+        correo: sess.correo,
+        proposito: "password_change",
+        device_hash: sess.deviceHash,
+        code_hmac: codeHmac,
+        payload_pendiente: { new_password_hash: newHash },
+        ip_origen: ip,
+      });
+      if (insErr) {
+        return json({ ok: false, error: "Error interno creando verificación OTP." }, 500);
+      }
+
+      const mail = await sendBrevoOtpEmail({
+        toEmail: sess.correo,
+        code,
+        proposito: "password_change",
+        deviceLabel,
+      });
+      if (!mail.ok) {
+        await admin.from("codigos_otp").delete().eq("id", challengeId);
+        return json({ ok: false, error: mail.error || "No se pudo enviar el código OTP." }, 502);
+      }
+
+      return json({
+        ok: true,
+        challenge_id: challengeId,
+        masked_email: maskEmail(sess.correo),
+        expires_in_sec: 600,
+        resend_cooldown_sec: OTP_RESEND_COOLDOWN_SEC,
+      });
+    }
+
+    // -------------------------------------------------------------------------
+    // 8. PASSWORD CHANGE VERIFY (Consume OTP + actualiza + revoca otras sesiones)
+    // -------------------------------------------------------------------------
+    if (action === "password_change_verify") {
+      const sess = await requireActiveSession(admin, body);
+      if (!sess.ok) {
+        return json({ ok: false, session_expired: true, error: "Sesión expirada. Vuelva a iniciar sesión." }, 401);
+      }
+      const challengeId = String(body?.challenge_id || "").trim();
+      const code = String(body?.code || "").trim();
+      if (!challengeId || !/^\d{6}$/.test(code)) {
+        return json({ ok: false, error: "Ingrese un código válido de 6 dígitos." }, 400);
+      }
+
+      const { data: meta } = await admin
+        .from("codigos_otp")
+        .select("dni, proposito")
+        .eq("id", challengeId)
+        .maybeSingle();
+
+      if (!meta || meta.proposito !== "password_change" || String(meta.dni).trim() !== sess.dni) {
+        return json({ ok: false, error: "Código inválido o expirado." });
+      }
+
+      const codeHmac = await computeOtpHmac(otpPepper, challengeId, sess.dni, "password_change", code);
+      const { data: res, error: rpcErr } = await admin.rpc("consumir_otp_atomico", {
+        p_challenge_id: challengeId,
+        p_device_hash: sess.deviceHash,
+        p_code_hmac: codeHmac,
+      });
+      if (rpcErr || !res?.ok) {
+        if (res?.reason === "locked") {
+          await logHoneyAlert(admin, "FUERZA_BRUTA_OTP_CAMBIO_CLAVE", `5 intentos fallidos DNI='${sess.dni}'`, ip);
+          return json({ ok: false, locked: true, error: "Código bloqueado por 5 intentos fallidos. Solicite uno nuevo." });
+        }
+        if (res?.reason === "expired") {
+          return json({ ok: false, expired: true, error: "El código expiró. Solicite uno nuevo." });
+        }
+        return json({
+          ok: false,
+          attempts_left: res?.attempts_left,
+          error:
+            typeof res?.attempts_left === "number"
+              ? `Código incorrecto. Quedan ${res.attempts_left} intento(s).`
+              : "Código inválido o ya utilizado.",
+        });
+      }
+
+      const newHash = String(res.payload_pendiente?.new_password_hash || "").trim();
+      const { data: upd, error: updErr } = await admin.rpc("actualizar_password_seguro", {
+        p_dni: sess.dni,
+        p_new_password_hash: newHash,
+        p_keep_token_hash: sess.tokenHash,
+        p_revocar_dispositivos: false,
+      });
+      if (updErr || !upd?.ok) {
+        return json({ ok: false, error: upd?.error || "No se pudo actualizar la contraseña." }, 500);
+      }
+
+      await sendBrevoSecurityNotice({
+        toEmail: sess.correo,
+        titulo: "Tu contraseña ha sido actualizada",
+        detalle:
+          "Tu contraseña de IndiServ Analytica se actualizó correctamente y se cerraron todas las demás sesiones activas. Si no realizaste este cambio, utiliza '¿Olvidaste tu contraseña?' de inmediato.",
+        accent: "#34d399",
+      });
+
+      return json({ ok: true });
+    }
+
+    // -------------------------------------------------------------------------
+    // 9. PASSWORD RESET INIT (Desde Login: DNI + correo + anti-enumeración + OTP)
+    // -------------------------------------------------------------------------
+    if (action === "password_reset_init") {
+      const dni = String(body?.dni || "").trim();
+      const correo = String(body?.correo || "").trim().toLowerCase();
+      const deviceHash = String(body?.device_hash || "").trim();
+      const deviceLabel = String(body?.device_label || "Dispositivo").trim().slice(0, 80);
+
+      if (dni.length < 8 || !correo.includes("@") || !isValidDeviceHash(deviceHash)) {
+        return json({ ok: false, error: "Ingrese su DNI (8 dígitos) y correo registrado." }, 400);
+      }
+
+      const neutralReply = {
+        ok: true,
+        challenge_id: crypto.randomUUID(),
+        masked_email: maskEmail(correo),
+        expires_in_sec: 600,
+        resend_cooldown_sec: OTP_RESEND_COOLDOWN_SEC,
+        neutral: true,
+      };
+
+      if (isHoney(dni, correo)) {
+        await logHoneyAlert(admin, "CREDENCIAL_SENUELO_RESET_CLAVE", `DNI='${dni}' correo='${correo}'`, ip);
+        return json(neutralReply);
+      }
+
+      const lim = await checkDniOtpLimits(admin, dni);
+      if (!lim.allowed) {
+        return json({ ok: false, error: lim.error, wait_sec: lim.waitSec || 0 }, 429);
+      }
+
+      const { data: foundUser } = await admin
+        .from("usuarios_app")
+        .select("dni, correo")
+        .eq("dni", dni)
+        .maybeSingle();
+
+      if (!foundUser || String(foundUser.correo || "").trim().toLowerCase() !== correo) {
+        // Respuesta neutra anti-enumeración (forma idéntica al éxito)
+        return json(neutralReply);
+      }
+
+      await admin
+        .from("codigos_otp")
+        .update({ usado: true })
+        .eq("dni", dni)
+        .eq("proposito", "password_reset")
+        .eq("usado", false);
+
+      const challengeId = crypto.randomUUID();
+      const code = generateOtp6();
+      const codeHmac = await computeOtpHmac(otpPepper, challengeId, dni, "password_reset", code);
+
+      const { error: insErr } = await admin.from("codigos_otp").insert({
+        id: challengeId,
+        dni,
+        correo: String(foundUser.correo).trim(),
+        proposito: "password_reset",
+        device_hash: deviceHash,
+        code_hmac: codeHmac,
+        payload_pendiente: { reset_from: deviceLabel },
+        ip_origen: ip,
+      });
+      if (insErr) {
+        return json({ ok: false, error: "Error interno iniciando recuperación." }, 500);
+      }
+
+      const mail = await sendBrevoOtpEmail({
+        toEmail: String(foundUser.correo).trim(),
+        code,
+        proposito: "password_reset",
+        deviceLabel,
+      });
+      if (!mail.ok) {
+        await admin.from("codigos_otp").delete().eq("id", challengeId);
+        return json({ ok: false, error: mail.error || "No se pudo enviar el correo de recuperación." }, 502);
+      }
+
+      return json({
+        ok: true,
+        challenge_id: challengeId,
+        masked_email: maskEmail(String(foundUser.correo).trim()),
+        expires_in_sec: 600,
+        resend_cooldown_sec: OTP_RESEND_COOLDOWN_SEC,
+        neutral: true,
+      });
+    }
+
+    // -------------------------------------------------------------------------
+    // 10. PASSWORD RESET VERIFY (OTP + nueva clave + revoca 100% sesiones/equipos)
+    // -------------------------------------------------------------------------
+    if (action === "password_reset_verify") {
+      const challengeId = String(body?.challenge_id || "").trim();
+      const code = String(body?.code || "").trim();
+      const newPasswordHash = String(body?.new_password_hash || "").trim();
+      const deviceHash = String(body?.device_hash || "").trim();
+
+      if (!challengeId || !/^\d{6}$/.test(code) || !newPasswordHash.startsWith("indiserv_v1$") || !isValidDeviceHash(deviceHash)) {
+        return json({ ok: false, error: "Ingrese el código de 6 dígitos y una nueva contraseña válida." }, 400);
+      }
+
+      const { data: meta } = await admin
+        .from("codigos_otp")
+        .select("dni, proposito")
+        .eq("id", challengeId)
+        .maybeSingle();
+
+      if (!meta || meta.proposito !== "password_reset") {
+        return json({ ok: false, error: "Código incorrecto o expirado." });
+      }
+
+      const codeHmac = await computeOtpHmac(otpPepper, challengeId, meta.dni, "password_reset", code);
+      const { data: res, error: rpcErr } = await admin.rpc("consumir_otp_atomico", {
+        p_challenge_id: challengeId,
+        p_device_hash: deviceHash,
+        p_code_hmac: codeHmac,
+      });
+      if (rpcErr || !res?.ok) {
+        if (res?.reason === "locked") {
+          await logHoneyAlert(admin, "FUERZA_BRUTA_OTP_RESET", `5 intentos fallidos DNI='${res.dni || meta.dni}'`, ip);
+          return json({ ok: false, locked: true, error: "Código bloqueado por 5 intentos fallidos. Solicite uno nuevo." });
+        }
+        if (res?.reason === "expired") {
+          return json({ ok: false, expired: true, error: "El código expiró. Solicite uno nuevo." });
+        }
+        return json({
+          ok: false,
+          attempts_left: res?.attempts_left,
+          error:
+            typeof res?.attempts_left === "number"
+              ? `Código incorrecto. Quedan ${res.attempts_left} intento(s).`
+              : "Código inválido o ya utilizado.",
+        });
+      }
+
+      const { data: upd, error: updErr } = await admin.rpc("actualizar_password_seguro", {
+        p_dni: res.dni,
+        p_new_password_hash: newPasswordHash,
+        p_keep_token_hash: null,
+        p_revocar_dispositivos: true,
+      });
+      if (updErr || !upd?.ok) {
+        return json({ ok: false, error: upd?.error || "No se pudo restablecer la contraseña." }, 500);
+      }
+
+      await sendBrevoSecurityNotice({
+        toEmail: res.correo,
+        titulo: "Tu contraseña fue restablecida",
+        detalle:
+          "Se restableció la contraseña de tu cuenta de IndiServ Analytica mediante recuperación por correo. Por seguridad, todas las sesiones activas y dispositivos de confianza previos fueron revocados.",
+        accent: "#f59e0b",
+      });
+
+      return json({ ok: true });
+    }
+
+    // -------------------------------------------------------------------------
+    // 11. ACCOUNT DELETE INIT (Clave actual + frase ELIMINAR + OTP Brevo)
+    // -------------------------------------------------------------------------
+    if (action === "account_delete_init") {
+      const sess = await requireActiveSession(admin, body);
+      if (!sess.ok) {
+        return json({ ok: false, session_expired: true, error: "Sesión expirada. Vuelva a iniciar sesión." }, 401);
+      }
+      const currentHash = String(body?.current_password_hash || "").trim();
+      const confirmText = String(body?.confirm_text || "").trim().toUpperCase();
+      const deviceLabel = String(body?.device_label || "Dispositivo").trim().slice(0, 80);
+
+      if (!currentHash) {
+        return json({ ok: false, error: "Ingrese su contraseña actual para confirmar." }, 400);
+      }
+      if (!["ELIMINAR", "ELIMINAR MI CUENTA", sess.dni.toUpperCase()].includes(confirmText)) {
+        return json({ ok: false, error: "Escriba ELIMINAR para confirmar la eliminación permanente." }, 400);
+      }
+
+      const { data: authCheck, error: authErr } = await admin.rpc("autenticar_usuario", {
+        p_dni: sess.dni,
+        p_correo: sess.correo,
+        p_password_hash: currentHash,
+      });
+      if (authErr || !authCheck?.ok) {
+        return json({ ok: false, error: "La contraseña actual es incorrecta." });
+      }
+
+      const lim = await checkDniOtpLimits(admin, sess.dni);
+      if (!lim.allowed) {
+        return json({ ok: false, error: lim.error, wait_sec: lim.waitSec || 0 }, 429);
+      }
+
+      await admin
+        .from("codigos_otp")
+        .update({ usado: true })
+        .eq("dni", sess.dni)
+        .eq("proposito", "account_delete")
+        .eq("usado", false);
+
+      const challengeId = crypto.randomUUID();
+      const code = generateOtp6();
+      const codeHmac = await computeOtpHmac(otpPepper, challengeId, sess.dni, "account_delete", code);
+
+      const { error: insErr } = await admin.from("codigos_otp").insert({
+        id: challengeId,
+        dni: sess.dni,
+        correo: sess.correo,
+        proposito: "account_delete",
+        device_hash: sess.deviceHash,
+        code_hmac: codeHmac,
+        payload_pendiente: { confirmed: true },
+        ip_origen: ip,
+      });
+      if (insErr) {
+        return json({ ok: false, error: "Error interno creando verificación de borrado." }, 500);
+      }
+
+      const mail = await sendBrevoOtpEmail({
+        toEmail: sess.correo,
+        code,
+        proposito: "account_delete",
+        deviceLabel,
+      });
+      if (!mail.ok) {
+        await admin.from("codigos_otp").delete().eq("id", challengeId);
+        return json({ ok: false, error: mail.error || "No se pudo enviar el código de confirmación." }, 502);
+      }
+
+      return json({
+        ok: true,
+        challenge_id: challengeId,
+        masked_email: maskEmail(sess.correo),
+        expires_in_sec: 600,
+        resend_cooldown_sec: OTP_RESEND_COOLDOWN_SEC,
+      });
+    }
+
+    // -------------------------------------------------------------------------
+    // 12. ACCOUNT DELETE VERIFY (Consume OTP + borrado total en cascada)
+    // -------------------------------------------------------------------------
+    if (action === "account_delete_verify") {
+      const sess = await requireActiveSession(admin, body);
+      if (!sess.ok) {
+        return json({ ok: false, session_expired: true, error: "Sesión expirada. Vuelva a iniciar sesión." }, 401);
+      }
+      const challengeId = String(body?.challenge_id || "").trim();
+      const code = String(body?.code || "").trim();
+      if (!challengeId || !/^\d{6}$/.test(code)) {
+        return json({ ok: false, error: "Ingrese un código válido de 6 dígitos." }, 400);
+      }
+
+      const { data: meta } = await admin
+        .from("codigos_otp")
+        .select("dni, proposito")
+        .eq("id", challengeId)
+        .maybeSingle();
+
+      if (!meta || meta.proposito !== "account_delete" || String(meta.dni).trim() !== sess.dni) {
+        return json({ ok: false, error: "Código inválido o expirado." });
+      }
+
+      const codeHmac = await computeOtpHmac(otpPepper, challengeId, sess.dni, "account_delete", code);
+      const { data: res, error: rpcErr } = await admin.rpc("consumir_otp_atomico", {
+        p_challenge_id: challengeId,
+        p_device_hash: sess.deviceHash,
+        p_code_hmac: codeHmac,
+      });
+      if (rpcErr || !res?.ok) {
+        if (res?.reason === "locked") {
+          await logHoneyAlert(admin, "FUERZA_BRUTA_OTP_ELIMINAR", `5 intentos fallidos DNI='${sess.dni}'`, ip);
+          return json({ ok: false, locked: true, error: "Código bloqueado por 5 intentos fallidos." });
+        }
+        if (res?.reason === "expired") {
+          return json({ ok: false, expired: true, error: "El código expiró. Solicite uno nuevo." });
+        }
+        return json({
+          ok: false,
+          attempts_left: res?.attempts_left,
+          error:
+            typeof res?.attempts_left === "number"
+              ? `Código incorrecto. Quedan ${res.attempts_left} intento(s).`
+              : "Código inválido o ya utilizado.",
+        });
+      }
+
+      const { data: delRes, error: delErr } = await admin.rpc("eliminar_cuenta_completa", {
+        p_dni: sess.dni,
+      });
+      if (delErr || !delRes?.ok) {
+        return json({ ok: false, error: delRes?.error || "No se pudo completar la eliminación de cuenta." }, 500);
+      }
+
+      await sendBrevoSecurityNotice({
+        toEmail: sess.correo,
+        titulo: "Tu cuenta ha sido eliminada permanentemente",
+        detalle: `Conforme a tu derecho de cancelación (Ley N.° 29733), tu cuenta DNI ${sess.dni}, tus dispositivos de confianza, sesiones activas y ${delRes.tickets_eliminados ?? 0} ticket(s) de diagnóstico fueron eliminados permanentemente de IndiServ Analytica.`,
+        accent: "#ef4444",
+      });
+
+      return json({
+        ok: true,
+        tickets_eliminados: delRes.tickets_eliminados ?? 0,
       });
     }
 

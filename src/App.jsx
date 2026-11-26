@@ -10,6 +10,7 @@ import MobileAuthView from './components/MobileAuthView';
 import MobileScannerView from './components/MobileScannerView';
 import MobileDiagnosticView from './components/MobileDiagnosticView';
 import MobileMaintenanceView from './components/MobileMaintenanceView';
+import MobileAccountView from './components/MobileAccountView';
 import TicketLookupBar from './components/TicketLookupBar';
 
 const ChassisScene = lazy(() => import('./components/ChassisScene'));
@@ -25,7 +26,7 @@ import {
 } from './utils/security';
 import {
   RotateCcw, Maximize2, Minimize2, EyeOff, Eye, FileDown, Laptop, Monitor,
-  Box, Search, Smartphone, LogOut, Stethoscope, Snowflake, ArrowLeft,
+  Box, Search, Smartphone, LogOut, Stethoscope, Snowflake, ArrowLeft, User,
 } from 'lucide-react';
 
 const FALLBACK = {
@@ -228,6 +229,7 @@ export default function App() {
   );
 
   const [authUser, setAuthUser] = useState(null);
+  const [authNotice, setAuthNotice] = useState('');
   const [restoringSession, setRestoringSession] = useState(() => Boolean(loadSessionToken()));
   const [guestUnlocked, setGuestUnlocked] = useState(!isNativeApp || Boolean(initialTicketParam));
 
@@ -266,6 +268,7 @@ export default function App() {
     const saved = loadSessionToken();
     clearSessionToken();
     setAuthUser(null);
+    setAuthNotice('');
     setGuestUnlocked(false);
     setTabHistory([]);
     if (saved) {
@@ -275,6 +278,28 @@ export default function App() {
         device_hash: saved.deviceHash,
       }).catch(() => {});
     }
+  }, []);
+
+  const handleAccountDeleted = useCallback((ticketsEliminados = 0) => {
+    clearSessionToken();
+    setAuthUser(null);
+    setGuestUnlocked(false);
+    setTabHistory([]);
+    setAuthNotice(
+      `Cuenta eliminada permanentemente junto con ${ticketsEliminados} ticket(s) de diagnóstico.`
+    );
+  }, []);
+
+  const handleSessionExpired = useCallback(() => {
+    clearSessionToken();
+    setAuthUser(null);
+    setGuestUnlocked(false);
+    setTabHistory([]);
+    setAuthNotice('Tu sesión segura de 15 minutos expiró. Vuelve a iniciar sesión.');
+  }, []);
+
+  const handleUserUpdated = useCallback((patch) => {
+    setAuthUser((prev) => (prev ? { ...prev, ...patch } : prev));
   }, []);
   const [activeTab, setActiveTab] = useState(isNativeApp && !initialTicketParam ? 'scanner' : '3d');
   const [tabHistory, setTabHistory] = useState([]);
@@ -543,12 +568,15 @@ export default function App() {
   if (!guestUnlocked && !authUser) {
     return (
       <MobileAuthView
+        initialNotice={authNotice}
         onAuthenticated={(user) => {
+          setAuthNotice('');
           setAuthUser(user);
           setTabHistory([]);
           setActiveTab('scanner');
         }}
         onGuestDemo={() => {
+          setAuthNotice('');
           setGuestUnlocked(true);
           setTabHistory([]);
           setActiveTab('scanner');
@@ -581,8 +609,9 @@ export default function App() {
             <TabletNavBtn icon={Snowflake} label="Cuidado" active={activeTab === 'maintenance'} onClick={() => navigateToTab('maintenance')} />
             <TabletNavBtn icon={Search} label="Tickets" active={activeTab === 'tickets'} onClick={() => navigateToTab('tickets')} />
             <TabletNavBtn icon={Box} label="Visor 3D" active={activeTab === '3d'} onClick={open3DTabSmart} />
+            <TabletNavBtn icon={User} label="Cuenta" active={activeTab === 'account'} onClick={() => navigateToTab('account')} avatarUrl={authUser?.avatar_data} />
           </div>
-          {isNativeApp && (
+          {(isNativeApp || authUser) && (
             <TabletNavBtn
               icon={LogOut}
               label="Salir"
@@ -664,6 +693,39 @@ export default function App() {
             <TicketLookupBar
               user={authUser}
               onSelectTicket={handleSelectTicketFromMobile}
+              onRequestLogin={() => setGuestUnlocked(false)}
+            />
+          </div>
+        </div>
+      ) : activeTab === 'account' ? (
+        <div key="tab-account" className="view-enter flex-1 overflow-hidden flex flex-col bg-[#090c12]">
+          {canGoBack && (
+            <div className="shrink-0 bg-[#101521] md:bg-[#101521]/95 border-b border-slate-800/80 px-3.5 py-2.5 flex items-center justify-between">
+              <button
+                onClick={goBackTab}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-cyan-300 hover:text-white bg-[#172033] border border-slate-700/70 px-3 py-1.5 rounded-lg"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" /> Atrás
+              </button>
+              <span className="text-[11px] font-semibold text-slate-300 tracking-wide">Mi Cuenta y Seguridad</span>
+              {authUser ? (
+                <button
+                  onClick={handleLogout}
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-300 hover:text-rose-200 bg-rose-500/10 border border-rose-500/25 px-2.5 py-1 rounded-lg"
+                >
+                  <LogOut className="w-3 h-3" /> Salir
+                </button>
+              ) : (
+                <span className="w-12" />
+              )}
+            </div>
+          )}
+          <div className="flex-1 overflow-hidden">
+            <MobileAccountView
+              user={authUser}
+              onUserUpdated={handleUserUpdated}
+              onAccountDeleted={handleAccountDeleted}
+              onSessionExpired={handleSessionExpired}
               onRequestLogin={() => setGuestUnlocked(false)}
             />
           </div>
@@ -780,27 +842,20 @@ export default function App() {
       )}
 
       {showAppNav && (
-        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-[#101521] border-t border-slate-800/90 px-1.5 pt-1.5 safe-bottom flex items-center justify-around shadow-[0_-8px_24px_rgba(0,0,0,0.45)]">
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-[#101521] border-t border-slate-800/90 px-1 pt-1.5 safe-bottom flex items-center justify-around shadow-[0_-8px_24px_rgba(0,0,0,0.45)]">
           <MobileNavBtn icon={Smartphone} label="Equipo" active={activeTab === 'scanner'} onClick={() => navigateToTab('scanner')} />
           <MobileNavBtn icon={Stethoscope} label="Diagnóst." active={activeTab === 'diagnostic'} onClick={() => navigateToTab('diagnostic')} />
           <MobileNavBtn icon={Snowflake} label="Cuidado" active={activeTab === 'maintenance'} onClick={() => navigateToTab('maintenance')} />
           <MobileNavBtn icon={Search} label="Tickets" active={activeTab === 'tickets'} onClick={() => navigateToTab('tickets')} />
           <MobileNavBtn icon={Box} label="3D" active={activeTab === '3d'} onClick={open3DTabSmart} />
-          {isNativeApp && (
-            <MobileNavBtn
-              icon={LogOut}
-              label="Salir"
-              active={false}
-              onClick={handleLogout}
-            />
-          )}
+          <MobileNavBtn icon={User} label="Cuenta" active={activeTab === 'account'} onClick={() => navigateToTab('account')} avatarUrl={authUser?.avatar_data} />
         </nav>
       )}
     </div>
   );
 }
 
-const TabletNavBtn = React.memo(function TabletNavBtn({ icon: Icon, label, active, onClick }) {
+const TabletNavBtn = React.memo(function TabletNavBtn({ icon: Icon, label, active, onClick, avatarUrl }) {
   return (
     <button
       onClick={onClick}
@@ -811,22 +866,30 @@ const TabletNavBtn = React.memo(function TabletNavBtn({ icon: Icon, label, activ
       }`}
     >
       {active && <span className="absolute left-0 top-2.5 bottom-2.5 w-[3px] rounded-r-full bg-emerald-400" />}
-      <Icon className="w-4 h-4" />
+      {avatarUrl ? (
+        <img src={avatarUrl} alt="" className="w-5 h-5 rounded-full object-cover border border-cyan-400/50" />
+      ) : (
+        <Icon className="w-4 h-4" />
+      )}
       <span className="text-[9px] font-semibold leading-tight">{label}</span>
     </button>
   );
 });
 
-const MobileNavBtn = React.memo(function MobileNavBtn({ icon: Icon, label, active, onClick }) {
+const MobileNavBtn = React.memo(function MobileNavBtn({ icon: Icon, label, active, onClick, avatarUrl }) {
   return (
     <button
       onClick={onClick}
-      className={`relative min-w-[48px] min-h-[44px] flex flex-col items-center justify-center gap-0.5 px-2.5 py-1 rounded-xl ${
+      className={`relative min-w-[44px] min-h-[44px] flex flex-col items-center justify-center gap-0.5 px-1.5 py-1 rounded-xl ${
         active ? 'text-emerald-300 bg-emerald-500/12' : 'text-slate-400 hover:text-slate-100'
       }`}
     >
-      {active && <span className="absolute top-0 left-3 right-3 h-[2px] rounded-full bg-emerald-400" />}
-      <Icon className="w-4 h-4" />
+      {active && <span className="absolute top-0 left-2.5 right-2.5 h-[2px] rounded-full bg-emerald-400" />}
+      {avatarUrl ? (
+        <img src={avatarUrl} alt="" className="w-4 h-4 rounded-full object-cover border border-cyan-400/50" />
+      ) : (
+        <Icon className="w-4 h-4" />
+      )}
       <span className="text-[9px] font-semibold leading-tight">{label}</span>
     </button>
   );

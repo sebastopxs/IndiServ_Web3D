@@ -19,20 +19,26 @@ import {
 } from '../utils/security';
 import { ShieldCheck, LogIn, UserPlus, Eye, EyeOff, FileText, X, CheckCircle2, AlertCircle, KeyRound, RefreshCw } from 'lucide-react';
 
-export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
+export default function MobileAuthView({ onAuthenticated, onGuestDemo, initialNotice = '' }) {
   const [mode, setMode] = useState('login');
   const [dni, setDni] = useState('');
   const [nick, setNick] = useState('');
   const [correo, setCorreo] = useState('');
   const [password, setPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [aceptaPolitica, setAceptaPolitica] = useState(false);
   const [showPolicyModal, setShowPolicyModal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+  const [success, setSuccess] = useState(initialNotice || '');
   const [otpChallenge, setOtpChallenge] = useState(null);
   const [otpCode, setOtpCode] = useState('');
+
+  useEffect(() => {
+    if (initialNotice) setSuccess(initialNotice);
+  }, [initialNotice]);
 
   useEffect(() => {
     if (!otpChallenge) return undefined;
@@ -347,6 +353,57 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
     }
   };
 
+  const handleForgotInit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setSuccess('');
+    const cleanDni = dni.trim();
+    const cleanCorreo = correo.trim();
+    if (cleanDni.length < 8 || !cleanCorreo.includes('@')) {
+      setError('Ingrese su DNI (8 dígitos) y correo registrado.');
+      return;
+    }
+    setLoading(true);
+    try {
+      const dev = await getDeviceFingerprint();
+      const res = await callAuthOtp({
+        action: 'password_reset_init',
+        dni: cleanDni,
+        correo: cleanCorreo,
+        device_hash: dev.deviceHash,
+        device_label: dev.deviceLabel,
+      });
+      if (res.error_conexion) {
+        setError(res.error_conexion);
+        return;
+      }
+      if (res.ok && res.challenge_id) {
+        setOtpCode('');
+        setNewPassword('');
+        setConfirmNewPassword('');
+        setOtpChallenge({
+          challengeId: res.challenge_id,
+          maskedEmail: res.masked_email || cleanCorreo,
+          proposito: 'password_reset',
+          dni: cleanDni,
+          expLeft: Number(res.expires_in_sec || 600),
+          resendLeft: Number(res.resend_cooldown_sec || 60),
+          retryPayload: {
+            action: 'password_reset_init',
+            dni: cleanDni,
+            correo: cleanCorreo,
+            device_hash: dev.deviceHash,
+            device_label: dev.deviceLabel,
+          },
+        });
+      } else {
+        setError(res.error || 'No se pudo iniciar la recuperación.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleVerifyOtp = async (e) => {
     e.preventDefault();
     if (!otpChallenge) return;
@@ -357,6 +414,46 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
       setError('Ingrese exactamente 6 dígitos numéricos.');
       return;
     }
+    if (otpChallenge.proposito === 'password_reset') {
+      const p1 = newPassword.trim();
+      const p2 = confirmNewPassword.trim();
+      if (p1.length < 8) {
+        setError('La nueva contraseña debe tener al menos 8 caracteres.');
+        return;
+      }
+      if (p1 !== p2) {
+        setError('Las contraseñas no coinciden.');
+        return;
+      }
+      setLoading(true);
+      try {
+        const dev = await getDeviceFingerprint();
+        const newHash = await hashPassword(otpChallenge.dni, p1);
+        const res = await callAuthOtp({
+          action: 'password_reset_verify',
+          challenge_id: otpChallenge.challengeId,
+          code: cleanCode,
+          new_password_hash: newHash,
+          device_hash: dev.deviceHash,
+        });
+        if (res.ok) {
+          setOtpChallenge(null);
+          setMode('login');
+          setPassword('');
+          setNewPassword('');
+          setConfirmNewPassword('');
+          setSuccess(
+            'Contraseña restablecida con éxito. Todas las sesiones anteriores fueron cerradas; inicie sesión con su nueva clave.'
+          );
+          return;
+        }
+        setError(res.error || res.error_conexion || 'Código incorrecto o expirado.');
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     setLoading(true);
     try {
       const dev = await getDeviceFingerprint();
@@ -426,10 +523,16 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
             <h1 className="text-lg font-semibold text-white">
               {otpChallenge.proposito === 'register'
                 ? 'Confirma tu correo de registro'
+                : otpChallenge.proposito === 'password_reset'
+                ? 'Restablecer Contraseña'
                 : 'Nuevo dispositivo detectado'}
             </h1>
             <p className="text-xs text-slate-400 mt-1">
-              Enviamos un código de 6 dígitos a <strong className="text-cyan-300">{otpChallenge.maskedEmail}</strong>.
+              {otpChallenge.proposito === 'password_reset' ? (
+                <>Si los datos coinciden con una cuenta activa, enviamos un código de 6 dígitos a <strong className="text-amber-300">{otpChallenge.maskedEmail}</strong>.</>
+              ) : (
+                <>Enviamos un código de 6 dígitos a <strong className="text-cyan-300">{otpChallenge.maskedEmail}</strong>.</>
+              )}
             </p>
           </div>
 
@@ -455,6 +558,35 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
               </p>
             </div>
 
+            {otpChallenge.proposito === 'password_reset' && (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                    Nueva Contraseña (mín. 8 caracteres)
+                  </label>
+                  <input
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full bg-[#0f172a] border border-slate-700 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-sm text-white outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                    Confirmar Nueva Contraseña
+                  </label>
+                  <input
+                    type="password"
+                    value={confirmNewPassword}
+                    onChange={(e) => setConfirmNewPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full bg-[#0f172a] border border-slate-700 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-sm text-white outline-none"
+                  />
+                </div>
+              </div>
+            )}
+
             {error && (
               <div className="flex items-start gap-2 text-xs text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-xl p-3">
                 <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
@@ -475,7 +607,11 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
               className="w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-[#03160f] font-semibold text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
             >
               <ShieldCheck className="w-4 h-4" />
-              {loading ? 'Verificando código…' : 'Verificar y Entrar (Sesión 15 min)'}
+              {loading
+                ? 'Verificando código…'
+                : otpChallenge.proposito === 'password_reset'
+                ? 'Restablecer Contraseña'
+                : 'Verificar y Entrar (Sesión 15 min)'}
             </button>
 
             <div className="flex items-center justify-between gap-2 pt-1">
@@ -527,16 +663,25 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
             </span>
           </div>
           <h1 className="text-lg font-semibold text-white">
-            {mode === 'login' ? 'Portal de Seguridad Técnica' : 'Registro de Operador'}
+            {mode === 'login'
+              ? 'Portal de Seguridad Técnica'
+              : mode === 'forgot'
+              ? 'Recuperar Contraseña'
+              : 'Registro de Operador'}
           </h1>
           <p className="text-xs text-slate-400 mt-0.5">
             {mode === 'login'
               ? 'Autenticación para telemetría móvil, tickets y Gemelo Digital 3D.'
+              : mode === 'forgot'
+              ? 'Ingrese su DNI y correo registrado para recibir un código de recuperación por Brevo.'
               : 'Validación contra padrón oficial público UNMSM en Supabase.'}
           </p>
         </div>
 
-        <form onSubmit={mode === 'login' ? handleLogin : handleRegister} className="p-5 space-y-3.5">
+        <form
+          onSubmit={mode === 'login' ? handleLogin : mode === 'forgot' ? handleForgotInit : handleRegister}
+          className="p-5 space-y-3.5"
+        >
           <div>
             <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
               DNI del Operador (8 dígitos)
@@ -579,27 +724,29 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
             />
           </div>
 
-          <div>
-            <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
-              Contraseña
-            </label>
-            <div className="relative">
-              <input
-                type={showPass ? 'text' : 'password'}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full bg-[#0f172a] border border-slate-700 focus:border-cyan-400 rounded-xl px-3.5 py-2.5 pr-11 text-sm text-white outline-none transition-colors"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPass((v) => !v)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
-              >
-                {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
+          {mode !== 'forgot' && (
+            <div>
+              <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                Contraseña
+              </label>
+              <div className="relative">
+                <input
+                  type={showPass ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full bg-[#0f172a] border border-slate-700 focus:border-cyan-400 rounded-xl px-3.5 py-2.5 pr-11 text-sm text-white outline-none transition-colors"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPass((v) => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                >
+                  {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
           {mode === 'register' && (
             <div className="flex items-start justify-between gap-2 pt-1 bg-slate-900/60 p-3 rounded-xl border border-slate-800">
@@ -641,11 +788,19 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
             disabled={loading}
             className="w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-[0.99] text-[#04140e] font-semibold text-sm flex items-center justify-center gap-2 transition-all disabled:opacity-50"
           >
-            {mode === 'login' ? <LogIn className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
+            {mode === 'login' ? (
+              <LogIn className="w-4 h-4" />
+            ) : mode === 'forgot' ? (
+              <KeyRound className="w-4 h-4" />
+            ) : (
+              <UserPlus className="w-4 h-4" />
+            )}
             {loading
               ? 'Verificando en Supabase…'
               : mode === 'login'
               ? 'Ingresar a IndiServ'
+              : mode === 'forgot'
+              ? 'Enviar Código de Recuperación'
               : 'Registrar Cuenta en la Nube'}
           </button>
 
@@ -660,6 +815,20 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo }) {
           >
             {mode === 'login' ? 'Crear Nueva Cuenta de Operador' : '← Volver al Inicio de Sesión'}
           </button>
+
+          {mode === 'login' && (
+            <button
+              type="button"
+              onClick={() => {
+                setError('');
+                setSuccess('');
+                setMode('forgot');
+              }}
+              className="w-full py-2 text-xs font-medium text-amber-300 hover:text-amber-200 inline-flex items-center justify-center gap-1.5 transition-colors"
+            >
+              <KeyRound className="w-3.5 h-3.5" /> ¿Olvidaste tu contraseña?
+            </button>
+          )}
 
           {onGuestDemo && (
             <button
