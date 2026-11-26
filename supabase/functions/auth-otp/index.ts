@@ -607,6 +607,69 @@ Deno.serve(async (req: Request) => {
       return json({ ok: true, avatar_data: upd.avatar_data || null });
     }
 
+    // -------------------------------------------------------------------------
+    // 2D. DEVICES LIST (Lista equipos confiables activos sin exponer device_hash)
+    // -------------------------------------------------------------------------
+    if (action === "devices_list") {
+      const sess = await requireActiveSession(admin, body);
+      if (!sess.ok) {
+        return json({ ok: false, session_expired: true, error: "Sesión expirada. Vuelva a iniciar sesión." }, 401);
+      }
+      const { data: devRes, error: devErr } = await admin.rpc("listar_dispositivos_confiables", {
+        p_dni: sess.dni,
+      });
+      if (devErr || !devRes?.ok) {
+        return json({ ok: false, error: devRes?.error || "No se pudieron consultar los equipos confiables." }, 500);
+      }
+      // deno-lint-ignore no-explicit-any
+      const rawList = Array.isArray(devRes.devices) ? devRes.devices : [];
+      // deno-lint-ignore no-explicit-any
+      const devices = rawList.map((d: any) => ({
+        id: String(d.id || ""),
+        device_label: String(d.device_label || "Dispositivo"),
+        plataforma: String(d.plataforma || "desktop"),
+        verificado_en: d.verificado_en || null,
+        ultimo_uso: d.ultimo_uso || null,
+        sesion_activa: Boolean(d.sesion_activa),
+        is_current: String(d.device_hash || "") === sess.deviceHash,
+      }));
+      return json({ ok: true, devices });
+    }
+
+    // -------------------------------------------------------------------------
+    // 2E. DEVICE REVOKE (Revoca equipo confiable y cierra sus sesiones activas)
+    // -------------------------------------------------------------------------
+    if (action === "device_revoke") {
+      const sess = await requireActiveSession(admin, body);
+      if (!sess.ok) {
+        return json({ ok: false, session_expired: true, error: "Sesión expirada. Vuelva a iniciar sesión." }, 401);
+      }
+      const deviceId = String(body?.device_id || "").trim();
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(deviceId)) {
+        return json({ ok: false, error: "Identificador de dispositivo inválido." }, 400);
+      }
+      const { data: revRes, error: revErr } = await admin.rpc("revocar_dispositivo_confiable", {
+        p_dni: sess.dni,
+        p_device_id: deviceId,
+      });
+      if (revErr || !revRes?.ok) {
+        return json({ ok: false, error: revRes?.error || "No se pudo revocar el dispositivo." }, 400);
+      }
+      const revokedCurrent = String(revRes.revoked_device_hash || "") === sess.deviceHash;
+      const devLabel = String(revRes.device_label || "Dispositivo");
+      await sendBrevoSecurityNotice({
+        toEmail: sess.correo,
+        titulo: "Equipo confiable revocado",
+        detalle: `Se revocó el acceso del equipo <strong>${devLabel.replace(/[<>&]/g, "")}</strong> y se cerraron sus sesiones activas. Si vuelve a iniciar sesión desde ese equipo se solicitará un nuevo código OTP.`,
+        accent: "#f59e0b",
+      });
+      return json({
+        ok: true,
+        revoked_current: revokedCurrent,
+        device_label: devLabel,
+      });
+    }
+
     if (!otpPepper || otpPepper.length < 16) {
       return json(
         { ok: false, error: "Secreto OTP_PEPPER no configurado en Supabase Secrets." },

@@ -17,7 +17,26 @@ import {
   saveSessionToken,
   callAuthOtp,
 } from '../utils/security';
-import { ShieldCheck, LogIn, UserPlus, Eye, EyeOff, FileText, X, CheckCircle2, AlertCircle, KeyRound, RefreshCw } from 'lucide-react';
+import {
+  ShieldCheck,
+  LogIn,
+  UserPlus,
+  Eye,
+  EyeOff,
+  FileText,
+  X,
+  CheckCircle2,
+  AlertCircle,
+  KeyRound,
+  RefreshCw,
+  Fingerprint,
+} from 'lucide-react';
+import {
+  getBiometricStatus,
+  enableBiometricLogin,
+  authenticateBiometricLogin,
+  disableBiometricLogin,
+} from '../utils/biometric';
 
 export default function MobileAuthView({ onAuthenticated, onGuestDemo, initialNotice = '' }) {
   const [mode, setMode] = useState('login');
@@ -35,10 +54,120 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo, initialNo
   const [success, setSuccess] = useState(initialNotice || '');
   const [otpChallenge, setOtpChallenge] = useState(null);
   const [otpCode, setOtpCode] = useState('');
+  const [bioStatus, setBioStatus] = useState({
+    available: false,
+    reason: 'web',
+    hasSavedCredentials: false,
+    nickname: '',
+    dniMask: '',
+  });
+  const [saveBiometricOptIn, setSaveBiometricOptIn] = useState(false);
+  const [bioBusy, setBioBusy] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    getBiometricStatus().then((st) => {
+      if (active) setBioStatus(st);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (initialNotice) setSuccess(initialNotice);
   }, [initialNotice]);
+
+  const maybeEnrollBiometric = async (userObj, cleanDni, cleanCorreo, passwordHash, enabledFlag) => {
+    if (!enabledFlag || !bioStatus.available) return;
+    try {
+      const res = await enableBiometricLogin({
+        dni: cleanDni,
+        correo: cleanCorreo,
+        password_hash: passwordHash,
+        nickname: userObj?.nickname || 'Operador',
+      });
+      if (res?.ok) {
+        const st = await getBiometricStatus();
+        setBioStatus(st);
+      }
+    } catch {
+      // No bloquear el inicio de sesión si el usuario canceló la huella
+    }
+  };
+
+  const handleBiometricLogin = async () => {
+    if (loading || bioBusy) return;
+    setError('');
+    setSuccess('');
+    setBioBusy(true);
+    try {
+      const bio = await authenticateBiometricLogin();
+      if (!bio?.ok) {
+        if (bio?.invalidated) {
+          const st = await getBiometricStatus();
+          setBioStatus(st);
+          setError(bio.error || 'Tu clave biométrica cambió. Inicia sesión con contraseña.');
+        } else if (!bio?.cancelled && bio?.error) {
+          setError(bio.error);
+        }
+        return;
+      }
+
+      const dev = await getDeviceFingerprint();
+      const otpRes = await callAuthOtp({
+        action: 'login_init',
+        dni: bio.dni,
+        correo: bio.correo,
+        password_hash: bio.password_hash,
+        device_hash: dev.deviceHash,
+        device_label: dev.deviceLabel,
+        plataforma: dev.plataforma,
+      });
+
+      if (otpRes.error_conexion) {
+        setError(otpRes.error_conexion);
+        return;
+      }
+      if (otpRes.ok && otpRes.requires_otp && otpRes.challenge_id) {
+        resetLoginRateLimit();
+        setOtpCode('');
+        setOtpChallenge({
+          challengeId: otpRes.challenge_id,
+          maskedEmail: otpRes.masked_email || bio.correo,
+          proposito: 'new_device',
+          expLeft: Number(otpRes.expires_in_sec || 600),
+          resendLeft: Number(otpRes.resend_cooldown_sec || 60),
+          retryPayload: {
+            action: 'login_init',
+            dni: bio.dni,
+            correo: bio.correo,
+            password_hash: bio.password_hash,
+            device_hash: dev.deviceHash,
+            device_label: dev.deviceLabel,
+            plataforma: dev.plataforma,
+          },
+        });
+        return;
+      }
+      if (otpRes.ok && otpRes.session_token && otpRes.user) {
+        resetLoginRateLimit();
+        saveSessionToken(otpRes.session_token, dev.deviceHash);
+        onAuthenticated(otpRes.user);
+        return;
+      }
+
+      // Contraseña modificada o cuenta eliminada: limpiar bóveda biométrica obsoleta
+      await disableBiometricLogin();
+      const st = await getBiometricStatus();
+      setBioStatus(st);
+      setError('Tu contraseña cambió o el acceso anterior venció. Ingresa con contraseña para reactivar tu huella.');
+    } catch (err) {
+      setError(`Error biométrico: ${err?.message || 'Verifique internet'}`);
+    } finally {
+      setBioBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (!otpChallenge) return undefined;
@@ -114,6 +243,10 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo, initialNo
             proposito: 'new_device',
             expLeft: Number(otpRes.expires_in_sec || 600),
             resendLeft: Number(otpRes.resend_cooldown_sec || 60),
+            pendingBiometric:
+              saveBiometricOptIn && bioStatus.available
+                ? { dni: cleanDni, correo: cleanCorreo, password_hash: hashedInput }
+                : null,
             retryPayload: {
               action: 'login_init',
               dni: cleanDni,
@@ -129,6 +262,7 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo, initialNo
         if (otpRes.ok && otpRes.session_token && otpRes.user) {
           resetLoginRateLimit();
           saveSessionToken(otpRes.session_token, dev.deviceHash);
+          await maybeEnrollBiometric(otpRes.user, cleanDni, cleanCorreo, hashedInput, saveBiometricOptIn);
           onAuthenticated(otpRes.user);
           return;
         }
@@ -437,6 +571,8 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo, initialNo
           device_hash: dev.deviceHash,
         });
         if (res.ok) {
+          await disableBiometricLogin();
+          getBiometricStatus().then(setBioStatus).catch(() => {});
           setOtpChallenge(null);
           setMode('login');
           setPassword('');
@@ -468,6 +604,10 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo, initialNo
       });
       if (res.ok && res.session_token && res.user) {
         saveSessionToken(res.session_token, dev.deviceHash);
+        const pb = otpChallenge.pendingBiometric;
+        if (pb) {
+          await maybeEnrollBiometric(res.user, pb.dni, pb.correo, pb.password_hash, true);
+        }
         setOtpChallenge(null);
         onAuthenticated(res.user);
         return;
@@ -509,8 +649,8 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo, initialNo
     const mm = String(Math.floor(otpChallenge.expLeft / 60)).padStart(2, '0');
     const ss = String(otpChallenge.expLeft % 60).padStart(2, '0');
     return (
-      <div className="min-h-screen w-full bg-[#090c12] text-slate-100 flex flex-col items-center justify-center p-4 overflow-y-auto">
-        <div className="view-enter w-full max-w-md instrument-card rounded-2xl shadow-2xl overflow-hidden">
+      <div className="h-full w-full bg-[#090c12] text-slate-100 overflow-y-auto px-4 py-5 flex flex-col items-center">
+        <div className="view-enter my-auto shrink-0 w-full max-w-md instrument-card rounded-2xl shadow-2xl overflow-hidden">
           <div className="bg-[#101521] p-5 border-b border-slate-800/80">
             <div className="flex items-center gap-2 mb-2">
               <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center">
@@ -645,8 +785,8 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo, initialNo
   }
 
   return (
-    <div className="min-h-screen w-full bg-[#090c12] text-slate-100 flex flex-col items-center justify-center p-4 overflow-y-auto">
-      <div className="view-enter w-full max-w-md instrument-card rounded-2xl shadow-2xl overflow-hidden">
+    <div className="h-full w-full bg-[#090c12] text-slate-100 overflow-y-auto px-4 py-5 flex flex-col items-center">
+      <div className="view-enter my-auto shrink-0 w-full max-w-md instrument-card rounded-2xl shadow-2xl overflow-hidden">
 
         <div className="bg-[#101521] p-5 border-b border-slate-800/80">
           <div className="flex items-center justify-between mb-2">
@@ -682,6 +822,27 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo, initialNo
           onSubmit={mode === 'login' ? handleLogin : mode === 'forgot' ? handleForgotInit : handleRegister}
           className="p-5 space-y-3.5"
         >
+          {mode === 'login' && bioStatus.available && bioStatus.hasSavedCredentials && (
+            <div className="space-y-2 pb-1">
+              <button
+                type="button"
+                disabled={loading || bioBusy}
+                onClick={handleBiometricLogin}
+                className="w-full py-3 px-4 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-400/40 text-cyan-200 font-semibold text-sm flex items-center justify-center gap-2.5 transition-colors disabled:opacity-50"
+              >
+                <Fingerprint className="w-5 h-5 text-cyan-300" />
+                {bioBusy
+                  ? 'Verificando huella…'
+                  : `Ingresar con Huella (${bioStatus.nickname || 'Operador'})`}
+              </button>
+              <div className="flex items-center gap-2 text-[10px] text-slate-500 uppercase tracking-wider">
+                <div className="h-px flex-1 bg-slate-800" />
+                <span>o con DNI y contraseña</span>
+                <div className="h-px flex-1 bg-slate-800" />
+              </div>
+            </div>
+          )}
+
           <div>
             <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
               DNI del Operador (8 dígitos)
@@ -746,6 +907,19 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo, initialNo
                 </button>
               </div>
             </div>
+          )}
+
+          {mode === 'login' && bioStatus.available && !bioStatus.hasSavedCredentials && (
+            <label className="flex items-center gap-2.5 p-2.5 rounded-xl bg-cyan-500/5 border border-cyan-500/20 text-xs text-slate-300 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={saveBiometricOptIn}
+                onChange={(e) => setSaveBiometricOptIn(e.target.checked)}
+                className="accent-cyan-400 w-4 h-4 rounded shrink-0"
+              />
+              <Fingerprint className="w-4 h-4 text-cyan-400 shrink-0" />
+              <span>Activar acceso rápido con huella digital en este teléfono</span>
+            </label>
           )}
 
           {mode === 'register' && (

@@ -314,10 +314,10 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
       const tid = await recordMobileEvent({
         user,
         deviceInfo: info,
-        tipoEvento: 'Escaneo CPU-Z Android',
+        tipoEvento: 'Escaneo Hardware Android',
         prefix: 'SCAN',
         healthScore: score,
-        diagnostico: `Perfil CPU-Z — ${info.commercialName} (${info.os} · Térmica: ${info.thermalStatus || 'Nominal'})`,
+        diagnostico: `Perfil Técnico — ${info.commercialName} (${info.os} · Térmica: ${info.thermalStatus || 'Nominal'})`,
         solucion: `SoC ${info.commercialSoc} (${info.cpuCores}C @ ${info.cpuMaxFreqMhz ? `${(info.cpuMaxFreqMhz / 1000).toFixed(2)} GHz` : 'ARM'}) · RAM ${info.ramTotalGb ?? '?'} GB (${info.ramUsedPct ?? '?'}%) · Almacenamiento ${info.storageTotalGb ?? '?'} GB · Batería ${info.batteryPct ?? '?'}% (${info.batteryHealth}${info.batteryTempC != null ? ` · ${info.batteryTempC}°C` : ''}).`,
       });
       setSavedScanId(tid || 'GUARDADO');
@@ -549,7 +549,7 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
                 onClick={handleSaveScanTicket}
                 disabled={savingScan || Boolean(savedScanId)}
                 className="py-2 px-3 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 text-xs font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-60"
-                title="Guardar escaneo CPU-Z en tu historial de tickets"
+                title="Guardar escaneo de hardware en tu historial de tickets"
               >
                 <CloudUpload className="w-3.5 h-3.5" />
                 {savingScan ? 'Guardando…' : savedScanId ? `✔ ${savedScanId.slice(-6)}` : 'Guardar Ticket'}
@@ -574,7 +574,7 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
               <div className="bg-[#131c2e] border border-slate-800 rounded-xl p-4 space-y-2.5">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 text-cyan-400 text-[10px] font-semibold uppercase">
-                    <Cpu className="w-3.5 h-3.5" /> Procesador (SoC) · Perfil CPU-Z
+                    <Cpu className="w-3.5 h-3.5" /> Procesador (SoC) · Telemetría de Silicio
                   </div>
                   <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded">
                     {info.cpuCores} Núcleos{info.cpuMaxFreqMhz ? ` @ ${(info.cpuMaxFreqMhz / 1000).toFixed(2)} GHz` : ''}

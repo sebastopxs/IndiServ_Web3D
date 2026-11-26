@@ -478,12 +478,12 @@ export default function MobileDiagnosticView({ deviceInfo, user, onOpenPhone3D }
                 </div>
               </div>
 
-              {/* Perfil Técnico CPU-Z Verificado en Este Equipo */}
+              {/* Perfil Técnico de Hardware Verificado en Este Equipo */}
               {deviceInfo && (
                 <div className="bg-[#0b0f19] border border-cyan-500/20 rounded-xl p-3.5 space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[10px] font-semibold uppercase tracking-wider text-cyan-400">
-                      Perfil Técnico CPU-Z Verificado en Este Equipo
+                      Perfil Técnico de Hardware Verificado en Este Equipo
                     </span>
                     <span className="text-[10px] font-mono text-slate-400">
                       Térmica: <strong className={(deviceInfo.thermalCode ?? 0) >= 2 ? 'text-rose-300' : 'text-emerald-300'}>{deviceInfo.thermalStatus || 'Nominal'}</strong>

@@ -26,6 +26,8 @@ html,
 body {
   margin: 0;
   padding: 0;
+  width: 100%;
+  height: 100%;
   background-color: var(--surface-canvas);
   color: #f1f5f9;
   overflow: hidden;
@@ -37,8 +39,8 @@ body {
 }
 
 #root {
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  height: 100%;
 }
 
 /* Tabular numerals for jitter-free live sensors (MHz, °C, %, RAM) */

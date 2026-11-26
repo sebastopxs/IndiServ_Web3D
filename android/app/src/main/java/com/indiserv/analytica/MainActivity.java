@@ -22,10 +22,12 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(HardwareInfoPlugin.class);
         registerPlugin(MaintenancePlugin.class);
+        registerPlugin(BiometricAuthPlugin.class);
         super.onCreate(savedInstanceState);
 
-        // Android 15/16 (targetSdk 35/36) fuerza edge-to-edge: aplicamos fondo Obsidian #090c12
-        // e insets reales para que el reloj, batería y cámara nunca tapen la barra superior.
+        // Edge-to-edge consistente en Android 10-16: evitamos doble empuje del teclado (adjustPan + IME)
+        // controlando en un único punto las barras del sistema, muesca y teclado virtual.
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         getWindow().getDecorView().setBackgroundColor(Color.parseColor("#090c12"));
         WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(
             getWindow(),
@@ -40,12 +42,13 @@ public class MainActivity extends BridgeActivity {
         if (content != null) {
             content.setBackgroundColor(Color.parseColor("#090c12"));
             ViewCompat.setOnApplyWindowInsetsListener(content, (view, windowInsets) -> {
-                Insets bars = windowInsets.getInsets(
+                Insets sys = windowInsets.getInsets(
                     WindowInsetsCompat.Type.systemBars()
                     | WindowInsetsCompat.Type.displayCutout()
-                    | WindowInsetsCompat.Type.ime()
                 );
-                view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+                Insets ime = windowInsets.getInsets(WindowInsetsCompat.Type.ime());
+                int bottomInset = Math.max(sys.bottom, ime.bottom);
+                view.setPadding(sys.left, sys.top, sys.right, bottomInset);
                 return WindowInsetsCompat.CONSUMED;
             });
             ViewCompat.requestApplyInsets(content);
