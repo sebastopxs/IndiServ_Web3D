@@ -126,7 +126,11 @@ input:focus-visible {
   animation: viewEnter 220ms var(--ease-out) both;
 }
 
-/* Safe-area padding for Android/iOS bottom gesture bars */
+/* Safe-area padding for Android/iOS top status bar & bottom gesture bars */
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+
 .safe-bottom {
   padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
 }

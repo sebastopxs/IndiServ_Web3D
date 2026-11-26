@@ -415,21 +415,13 @@ export default function MobileAccountView({
   return (
     <div className="h-full overflow-y-auto bg-[#090c12] px-4 py-5 pb-24 md:pb-8">
       <div className="mx-auto w-full md:max-w-none xl:max-w-[1440px] space-y-5">
-        <header className="flex flex-wrap items-center justify-between gap-3">
+        <header className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-400">
               Identidad y Privacidad ARCO
             </p>
             <h1 className="text-xl font-semibold text-white">Mi Cuenta y Seguridad</h1>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowPolicyModal(true)}
-            className="inline-flex items-center gap-1.5 text-xs font-medium text-cyan-300 bg-[#141b2a] hover:bg-[#192235] border border-cyan-500/25 px-3.5 py-2 rounded-xl"
-          >
-            <FileText className="w-4 h-4" />
-            Política de Privacidad ({VERSION_POLITICA.split(' ')[0]})
-          </button>
         </header>
 
         {!user ? (
@@ -542,7 +534,7 @@ export default function MobileAccountView({
               )}
 
               <p className="text-[11px] text-slate-400 leading-relaxed bg-[#101521] border border-slate-800/80 rounded-xl p-3">
-                La foto se comprime en tu dispositivo a 192×192 px (≤ 60 KB), se valida por firma binaria (*magic bytes*) en servidor y se elimina al instante si la retiras o borras tu cuenta.
+                La foto se comprime en tu dispositivo a 192×192 px (≤ 60 KB), se valida por firma binaria (magic bytes) en servidor y se elimina al instante si la retiras o borras tu cuenta.
               </p>
             </section>
 
