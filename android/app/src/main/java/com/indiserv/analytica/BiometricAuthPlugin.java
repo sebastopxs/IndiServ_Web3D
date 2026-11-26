@@ -2,7 +2,9 @@ package com.indiserv.analytica;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.os.Build;
 import android.security.keystore.KeyGenParameterSpec;
+import android.security.keystore.KeyPermanentlyInvalidatedException;
 import android.security.keystore.KeyProperties;
 import android.util.Base64;
 
@@ -30,23 +32,26 @@ import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
 
 /**
- * BiometricAuthPlugin — Autenticación biométrica nativa Android (huella digital)
- * con bóveda cifrada AES-256-GCM en AndroidKeyStore y tokens rotativos de un solo uso.
+ * BiometricAuthPlugin — Autenticación biométrica fuerte (BIOMETRIC_STRONG) vinculada
+ * a clave AES-256-GCM en AndroidKeyStore con setUserAuthenticationRequired(true) y
+ * setInvalidatedByBiometricEnrollment(true).
  *
- * Nunca almacena contraseñas ni password_hash: guarda únicamente un token biométrico
- * opaco emitido por auth-otp, ligado al device_hash y rotado en cada inicio de sesión.
+ * La clave del TEE/StrongBox solo se desbloquea durante una ventana de 15 s tras la
+ * verificación biométrica real del hardware (permitiendo descifrar y rotar el token
+ * atómico de un solo uso sin pedir la huella dos veces).
  */
 @CapacitorPlugin(name = "BiometricAuth")
 public class BiometricAuthPlugin extends Plugin {
-    private static final String KEY_ALIAS = "indiserv_biometric_aes_v2";
+    private static final String KEY_ALIAS = "indiserv_biometric_aes_strong_v3";
     private static final String KEYSTORE_PROVIDER = "AndroidKeyStore";
-    private static final String PREFS_NAME = "indiserv_biometric_vault_v2";
+    private static final String PREFS_NAME = "indiserv_biometric_vault_v3";
     private static final String KEY_ENC_PAYLOAD = "enc_payload";
     private static final String KEY_ENC_IV = "enc_iv";
     private static final String KEY_META_NICK = "meta_nickname";
     private static final String KEY_META_DNI_MASK = "meta_dni_mask";
     private static final String TRANSFORMATION = "AES/GCM/NoPadding";
     private static final int GCM_TAG_BITS = 128;
+    private static final int AUTH_WINDOW_SEC = 15;
 
     private SharedPreferences getVaultPrefs() {
         return getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
@@ -62,16 +67,43 @@ public class BiometricAuthPlugin extends Plugin {
             }
         }
         KeyGenerator keyGen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE_PROVIDER);
-        KeyGenParameterSpec spec = new KeyGenParameterSpec.Builder(
+        KeyGenParameterSpec.Builder builder = new KeyGenParameterSpec.Builder(
             KEY_ALIAS,
             KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT
         )
             .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
             .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
             .setKeySize(256)
-            .build();
-        keyGen.init(spec);
+            .setUserAuthenticationRequired(true)
+            .setInvalidatedByBiometricEnrollment(true);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            builder.setUserAuthenticationParameters(
+                AUTH_WINDOW_SEC,
+                KeyProperties.AUTH_BIOMETRIC_STRONG
+            );
+        } else {
+            // API 24-29: ventana corta de 15 s vinculada a autenticación biométrica del sistema
+            builder.setUserAuthenticationValidityDurationSeconds(AUTH_WINDOW_SEC);
+        }
+
+        keyGen.init(builder.build());
         return keyGen.generateKey();
+    }
+
+    private void deleteKeyAndVault() {
+        getVaultPrefs().edit().clear().apply();
+        getContext().getSharedPreferences("indiserv_biometric_vault_v1", Context.MODE_PRIVATE).edit().clear().apply();
+        getContext().getSharedPreferences("indiserv_biometric_vault_v2", Context.MODE_PRIVATE).edit().clear().apply();
+        try {
+            KeyStore ks = KeyStore.getInstance(KEYSTORE_PROVIDER);
+            ks.load(null);
+            if (ks.containsAlias(KEY_ALIAS)) {
+                ks.deleteEntry(KEY_ALIAS);
+            }
+        } catch (Exception ignored) {
+            // Silencioso
+        }
     }
 
     private void encryptAndStore(String dni, String biometricToken, String nickname) throws Exception {
@@ -113,18 +145,11 @@ public class BiometricAuthPlugin extends Plugin {
         return new JSONObject(new String(plainBytes, StandardCharsets.UTF_8));
     }
 
-    private void clearVault() {
-        getVaultPrefs().edit().clear().apply();
-        // Limpiar también cualquier bóveda v1 previa
-        getContext().getSharedPreferences("indiserv_biometric_vault_v1", Context.MODE_PRIVATE)
-            .edit().clear().apply();
-    }
-
     @PluginMethod
     public void getStatus(PluginCall call) {
         Context ctx = getContext();
         BiometricManager bm = BiometricManager.from(ctx);
-        int canAuth = bm.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK);
+        int canAuth = bm.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG);
         boolean available = (canAuth == BiometricManager.BIOMETRIC_SUCCESS);
 
         String reason = "ready";
@@ -176,10 +201,10 @@ public class BiometricAuthPlugin extends Plugin {
         }
 
         BiometricManager bm = BiometricManager.from(activity);
-        if (bm.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK) != BiometricManager.BIOMETRIC_SUCCESS) {
+        if (bm.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) != BiometricManager.BIOMETRIC_SUCCESS) {
             JSObject err = new JSObject();
             err.put("ok", false);
-            err.put("error", "Configura al menos una huella digital en los Ajustes de Android.");
+            err.put("error", "Configura una huella digital fuerte (Clase 3) en los Ajustes de Android.");
             call.resolve(err);
             return;
         }
@@ -202,8 +227,14 @@ public class BiometricAuthPlugin extends Plugin {
                             ret.put("nickname", safeNick);
                             ret.put("dniMask", dniMask);
                             call.resolve(ret);
+                        } catch (KeyPermanentlyInvalidatedException inv) {
+                            deleteKeyAndVault();
+                            JSObject ret = new JSObject();
+                            ret.put("ok", false);
+                            ret.put("error", "Las huellas del dispositivo cambiaron; intenta activarla nuevamente.");
+                            call.resolve(ret);
                         } catch (Exception ex) {
-                            clearVault();
+                            deleteKeyAndVault();
                             JSObject ret = new JSObject();
                             ret.put("ok", false);
                             ret.put("error", "No se pudo cifrar en AndroidKeyStore: " + ex.getMessage());
@@ -225,9 +256,9 @@ public class BiometricAuthPlugin extends Plugin {
 
             BiometricPrompt.PromptInfo info = new BiometricPrompt.PromptInfo.Builder()
                 .setTitle("Activar acceso con huella")
-                .setSubtitle("Confirma tu huella digital para vincular este teléfono")
+                .setSubtitle("Confirma tu huella digital (hardware TEE/StrongBox)")
                 .setNegativeButtonText("Cancelar")
-                .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_WEAK)
+                .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
                 .build();
 
             prompt.authenticate(info);
@@ -290,7 +321,7 @@ public class BiometricAuthPlugin extends Plugin {
                         try {
                             JSONObject data = decryptStored();
                             if (data == null || data.optString("biometric_token", "").isEmpty()) {
-                                clearVault();
+                                deleteKeyAndVault();
                                 JSObject ret = new JSObject();
                                 ret.put("ok", false);
                                 ret.put("invalidated", true);
@@ -305,11 +336,11 @@ public class BiometricAuthPlugin extends Plugin {
                             ret.put("nickname", data.optString("nickname", "Operador"));
                             call.resolve(ret);
                         } catch (Exception ex) {
-                            clearVault();
+                            deleteKeyAndVault();
                             JSObject ret = new JSObject();
                             ret.put("ok", false);
                             ret.put("invalidated", true);
-                            ret.put("error", "La clave biométrica cambió. Inicia sesión con contraseña para reactivarla.");
+                            ret.put("error", "La clave biométrica cambió o fue invalidada. Inicia sesión con contraseña para reactivarla.");
                             call.resolve(ret);
                         }
                     }
@@ -330,7 +361,7 @@ public class BiometricAuthPlugin extends Plugin {
                 .setTitle("Ingresar a IndiServ Analytica")
                 .setSubtitle("Verifica tu huella digital para entrar como " + nick)
                 .setNegativeButtonText("Usar contraseña")
-                .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_WEAK)
+                .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
                 .build();
 
             prompt.authenticate(info);
@@ -339,7 +370,7 @@ public class BiometricAuthPlugin extends Plugin {
 
     @PluginMethod
     public void disableBiometric(PluginCall call) {
-        clearVault();
+        deleteKeyAndVault();
         JSObject ret = new JSObject();
         ret.put("ok", true);
         call.resolve(ret);

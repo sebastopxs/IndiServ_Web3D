@@ -842,6 +842,14 @@ Deno.serve(async (req: Request) => {
     }
 
     if (action === "ticket_get_public") {
+      const { data: rlPub } = await admin.rpc("consumir_rate_limit", {
+        p_key: `pub_tkt:${ip}`,
+        p_window_sec: 60,
+        p_max_hits: 15,
+      });
+      if (rlPub && rlPub.allowed === false) {
+        return json({ ok: false, error: `Demasiadas consultas. Espera ${rlPub.wait_sec || 60} s.` }, 429);
+      }
       const ticketId = String(body?.ticket_id || "").trim();
       if (ticketId.length < 6 || ticketId.length > 64) {
         return json({ ok: false, error: "ID de ticket inválido." }, 400);
@@ -891,10 +899,46 @@ Deno.serve(async (req: Request) => {
     }
 
     if (action === "honey_alert") {
+      const { data: rlHoney } = await admin.rpc("consumir_rate_limit", {
+        p_key: `honey:${ip}`,
+        p_window_sec: 60,
+        p_max_hits: 5,
+      });
+      if (rlHoney && rlHoney.allowed === false) {
+        return json({ ok: true }); // Silencioso para no informar al atacante
+      }
       const tipo = String(body?.tipo || "ALERTA").trim().slice(0, 80);
       const detalle = String(body?.detalle || "").trim().slice(0, 300);
       await logHoneyAlert(admin, tipo, detalle, ip);
       return json({ ok: true });
+    }
+
+    // Migración única de cuentas legacy (indiserv_v1$) a PBKDF2-210k autenticada con x-admin-pepper
+    if (action === "admin_migrate_legacy_hashes") {
+      const provided = String(req.headers.get("x-admin-pepper") || "").trim();
+      if (!otpPepper || !provided || !timingSafeEqualStr(provided, otpPepper)) {
+        return json({ ok: false, error: "No autorizado." }, 401);
+      }
+      const { data: legacyRows, error: qErr } = await admin
+        .from("usuarios_app")
+        .select("dni, password_hash")
+        .like("password_hash", "indiserv_v1$%")
+        .limit(200);
+      if (qErr) {
+        return json({ ok: false, error: "Error consultando cuentas legacy." }, 500);
+      }
+      let migrated = 0;
+      for (const row of legacyRows || []) {
+        const oldHash = String(row.password_hash || "").trim();
+        if (!oldHash.startsWith("indiserv_v1$")) continue;
+        const wrapped = await hashPasswordPbkdf2(oldHash, otpPepper);
+        const { error: uErr } = await admin
+          .from("usuarios_app")
+          .update({ password_hash: wrapped })
+          .eq("dni", row.dni);
+        if (!uErr) migrated += 1;
+      }
+      return json({ ok: true, migrated });
     }
 
     // -------------------------------------------------------------------------

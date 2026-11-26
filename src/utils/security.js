@@ -81,7 +81,7 @@ function randomHex(bytesLen = 4) {
 export function generateSecureTicketId(dniOrPrefix, tag = 'MOB') {
   const clean = String(dniOrPrefix || '').trim();
   const pref = clean.length >= 4 ? clean.slice(0, 4) : 'MOB';
-  return `${pref}-${tag}-${randomHex(4)}`;
+  return `${pref}-${tag}-${randomHex(8)}`;
 }
 
 export async function hashPassword(dni, password) {
