@@ -12,10 +12,10 @@
 #   public *;
 #}
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
-
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# Reglas R8/ProGuard para preservar plugins nativos Capacitor y anotaciones en Release
+-keepattributes *Annotation*
+-keep @com.getcapacitor.annotation.CapacitorPlugin class * { *; }
+-keep class com.indiserv.analytica.** { *; }
+-keepclassmembers class * extends com.getcapacitor.Plugin {
+    @com.getcapacitor.PluginMethod <methods>;
+}

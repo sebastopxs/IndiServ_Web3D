@@ -76,10 +76,11 @@ function getCorsHeaders(req: Request): Record<string, string> {
 }
 
 function getClientIp(req: Request): string {
+  // Prioriza cabeceras inyectadas por el proxy de borde (sin aceptar x-forwarded-for falsificable)
   return (
     req.headers.get("cf-connecting-ip")?.trim() ||
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    "anon"
+    req.headers.get("x-real-ip")?.trim() ||
+    "edge-anon"
   );
 }
 
@@ -851,7 +852,7 @@ Deno.serve(async (req: Request) => {
         return json({ ok: false, error: `Demasiadas consultas. Espera ${rlPub.wait_sec || 60} s.` }, 429);
       }
       const ticketId = String(body?.ticket_id || "").trim();
-      if (ticketId.length < 6 || ticketId.length > 64) {
+      if (!/^[A-Za-z0-9_-]{6,48}$/.test(ticketId)) {
         return json({ ok: false, error: "ID de ticket inválido." }, 400);
       }
       const { data: res, error } = await admin.rpc("consultar_ticket_publico", {

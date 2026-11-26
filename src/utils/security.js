@@ -276,10 +276,26 @@ export async function getDeviceFingerprint() {
   return { deviceHash, deviceLabel, plataforma };
 }
 
+function getSessionStorageBackend() {
+  try {
+    if (Capacitor.isNativePlatform()) {
+      return typeof localStorage !== 'undefined' ? localStorage : null;
+    }
+    // En navegador Web usamos sessionStorage (muere al cerrar la pestaña) y limpiamos restos en localStorage
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+    }
+    return typeof sessionStorage !== 'undefined' ? sessionStorage : null;
+  } catch {
+    return typeof sessionStorage !== 'undefined' ? sessionStorage : null;
+  }
+}
+
 export function saveSessionToken(token, deviceHash) {
   try {
-    if (typeof localStorage === 'undefined') return;
-    localStorage.setItem(
+    const store = getSessionStorageBackend();
+    if (!store) return;
+    store.setItem(
       SESSION_STORAGE_KEY,
       JSON.stringify({ token: String(token), deviceHash: String(deviceHash) })
     );
@@ -290,8 +306,9 @@ export function saveSessionToken(token, deviceHash) {
 
 export function loadSessionToken() {
   try {
-    if (typeof localStorage === 'undefined') return null;
-    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+    const store = getSessionStorageBackend();
+    if (!store) return null;
+    const raw = store.getItem(SESSION_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (parsed?.token && parsed?.deviceHash) {
@@ -305,6 +322,9 @@ export function loadSessionToken() {
 
 export function clearSessionToken() {
   try {
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.removeItem(SESSION_STORAGE_KEY);
+    }
     if (typeof localStorage !== 'undefined') {
       localStorage.removeItem(SESSION_STORAGE_KEY);
     }
