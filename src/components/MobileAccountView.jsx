@@ -19,6 +19,9 @@ import {
   LogIn,
   Laptop,
   Ticket,
+  ChevronDown,
+  ChevronRight,
+  Lock,
 } from 'lucide-react';
 import {
   callAuthOtp,
@@ -90,6 +93,9 @@ export default function MobileAccountView({
     tickets_count: null,
   });
   const [showPolicyModal, setShowPolicyModal] = useState(false);
+  // Secciones sensibles colapsadas por defecto (acordeón limpio en APK y Web)
+  const [openSection, setOpenSection] = useState(null); // null | 'password' | 'delete'
+  const toggleSection = (key) => setOpenSection((prev) => (prev === key ? null : key));
 
   // Avatar state
   const [avatarBusy, setAvatarBusy] = useState(false);
@@ -540,177 +546,244 @@ export default function MobileAccountView({
               </p>
             </section>
 
-            {/* COLUMNA DERECHA: CAMBIO DE CONTRASEÑA + ELIMINACIÓN */}
-            <div className="lg:col-span-7 space-y-5">
-              {/* CAMBIAR CONTRASEÑA */}
-              <section className="instrument-card rounded-2xl p-5 space-y-3.5">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg bg-cyan-500/12 border border-cyan-500/25 flex items-center justify-center">
-                    <KeyRound className="w-4 h-4 text-cyan-400" />
-                  </div>
-                  <div>
-                    <h2 className="text-sm font-semibold text-white">Cambiar Contraseña (Doble Factor OTP)</h2>
-                    <p className="text-[11px] text-slate-400">
-                      Requiere tu contraseña actual + código de 6 dígitos al correo. Cierra las demás sesiones activas.
-                    </p>
-                  </div>
-                </div>
+            {/* COLUMNA DERECHA: MENÚ DESPLEGABLE DE SEGURIDAD Y PRIVACIDAD */}
+            <div className="lg:col-span-7 space-y-3">
+              <div className="flex items-center gap-2 px-1">
+                <Lock className="w-3.5 h-3.5 text-cyan-400" />
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                  Seguridad y Opciones Avanzadas
+                </span>
+              </div>
 
-                <form onSubmit={handlePwdInit} className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                  <input
-                    type="password"
-                    value={curPwd}
-                    onChange={(e) => setCurPwd(e.target.value)}
-                    placeholder="Contraseña actual"
-                    className="bg-[#0f172a] border border-slate-700 focus:border-cyan-400 rounded-xl px-3 py-2 text-xs text-white outline-none"
-                  />
-                  <input
-                    type="password"
-                    value={newPwd}
-                    onChange={(e) => setNewPwd(e.target.value)}
-                    placeholder="Nueva (mín. 8)"
-                    className="bg-[#0f172a] border border-slate-700 focus:border-cyan-400 rounded-xl px-3 py-2 text-xs text-white outline-none"
-                  />
-                  <input
-                    type="password"
-                    value={repPwd}
-                    onChange={(e) => setRepPwd(e.target.value)}
-                    placeholder="Confirmar nueva"
-                    className="bg-[#0f172a] border border-slate-700 focus:border-cyan-400 rounded-xl px-3 py-2 text-xs text-white outline-none"
-                  />
-                  <button
-                    type="submit"
-                    disabled={pwdBusy}
-                    className="sm:col-span-3 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs inline-flex items-center justify-center gap-1.5 disabled:opacity-50"
-                  >
-                    <ShieldCheck className="w-4 h-4" />
-                    {pwdBusy && !pwdChallenge ? 'Validando y enviando OTP…' : 'Paso 1: Enviar Código OTP al Correo'}
-                  </button>
-                </form>
+              {/* DESPLEGABLE 1: CAMBIAR CONTRASEÑA */}
+              <section className="instrument-card rounded-2xl overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => toggleSection('password')}
+                  aria-expanded={openSection === 'password'}
+                  className="w-full px-5 py-4 flex items-center justify-between gap-3 text-left hover:bg-white/[0.02]"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-xl bg-cyan-500/12 border border-cyan-500/25 flex items-center justify-center shrink-0">
+                      <KeyRound className="w-4 h-4 text-cyan-400" />
+                    </div>
+                    <div className="min-w-0">
+                      <h2 className="text-sm font-semibold text-white">Cambiar Contraseña</h2>
+                      <p className="text-[11px] text-slate-400 truncate">
+                        Doble factor OTP por correo · Cierra otras sesiones activas
+                      </p>
+                    </div>
+                  </div>
+                  {openSection === 'password' ? (
+                    <ChevronDown className="w-4 h-4 text-cyan-400 shrink-0" />
+                  ) : (
+                    <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />
+                  )}
+                </button>
 
-                {pwdChallenge && (
-                  <form onSubmit={handlePwdVerify} className="bg-[#101521] border border-cyan-500/30 rounded-xl p-3.5 space-y-2.5">
-                    <p className="text-[11px] text-cyan-300 font-medium">
-                      Paso 2: Ingresa el código de 6 dígitos enviado a {pwdChallenge.maskedEmail}
-                    </p>
-                    <div className="flex gap-2">
+                {openSection === 'password' && (
+                  <div className="px-5 pb-5 pt-2 border-t border-slate-800/80 space-y-3.5">
+                    <form onSubmit={handlePwdInit} className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                       <input
-                        type="text"
-                        inputMode="numeric"
-                        maxLength={6}
-                        value={pwdOtp}
-                        onChange={(e) => setPwdOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                        placeholder="000000"
-                        className="w-36 bg-[#090c12] border border-slate-700 focus:border-emerald-400 rounded-xl px-3 py-2 text-center font-mono text-base tracking-[0.3em] text-white outline-none"
+                        type="password"
+                        value={curPwd}
+                        onChange={(e) => setCurPwd(e.target.value)}
+                        placeholder="Contraseña actual"
+                        className="bg-[#0f172a] border border-slate-700 focus:border-cyan-400 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                      />
+                      <input
+                        type="password"
+                        value={newPwd}
+                        onChange={(e) => setNewPwd(e.target.value)}
+                        placeholder="Nueva (mín. 8)"
+                        className="bg-[#0f172a] border border-slate-700 focus:border-cyan-400 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                      />
+                      <input
+                        type="password"
+                        value={repPwd}
+                        onChange={(e) => setRepPwd(e.target.value)}
+                        placeholder="Confirmar nueva"
+                        className="bg-[#0f172a] border border-slate-700 focus:border-cyan-400 rounded-xl px-3 py-2 text-xs text-white outline-none"
                       />
                       <button
                         type="submit"
-                        disabled={pwdBusy || pwdOtp.length !== 6}
-                        className="flex-1 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-[#03160f] font-semibold text-xs disabled:opacity-50"
+                        disabled={pwdBusy}
+                        className="sm:col-span-3 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs inline-flex items-center justify-center gap-1.5 disabled:opacity-50"
                       >
-                        {pwdBusy ? 'Verificando…' : 'Confirmar Cambio de Contraseña'}
+                        <ShieldCheck className="w-4 h-4" />
+                        {pwdBusy && !pwdChallenge ? 'Validando y enviando OTP…' : 'Paso 1: Enviar Código OTP al Correo'}
                       </button>
-                    </div>
-                  </form>
-                )}
+                    </form>
 
-                {pwdMsg.text && (
-                  <div
-                    className={`flex items-start gap-2 text-xs rounded-xl p-2.5 border ${
-                      pwdMsg.type === 'ok'
-                        ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/25'
-                        : 'text-rose-300 bg-rose-500/10 border-rose-500/25'
-                    }`}
-                  >
-                    {pwdMsg.type === 'ok' ? (
-                      <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
-                    ) : (
-                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    {pwdChallenge && (
+                      <form onSubmit={handlePwdVerify} className="bg-[#101521] border border-cyan-500/30 rounded-xl p-3.5 space-y-2.5">
+                        <p className="text-[11px] text-cyan-300 font-medium">
+                          Paso 2: Ingresa el código de 6 dígitos enviado a {pwdChallenge.maskedEmail}
+                        </p>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            maxLength={6}
+                            value={pwdOtp}
+                            onChange={(e) => setPwdOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                            placeholder="000000"
+                            className="w-36 bg-[#090c12] border border-slate-700 focus:border-emerald-400 rounded-xl px-3 py-2 text-center font-mono text-base tracking-[0.3em] text-white outline-none"
+                          />
+                          <button
+                            type="submit"
+                            disabled={pwdBusy || pwdOtp.length !== 6}
+                            className="flex-1 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-[#03160f] font-semibold text-xs disabled:opacity-50"
+                          >
+                            {pwdBusy ? 'Verificando…' : 'Confirmar Cambio de Contraseña'}
+                          </button>
+                        </div>
+                      </form>
                     )}
-                    <span>{pwdMsg.text}</span>
+
+                    {pwdMsg.text && (
+                      <div
+                        className={`flex items-start gap-2 text-xs rounded-xl p-2.5 border ${
+                          pwdMsg.type === 'ok'
+                            ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/25'
+                            : 'text-rose-300 bg-rose-500/10 border-rose-500/25'
+                        }`}
+                      >
+                        {pwdMsg.type === 'ok' ? (
+                          <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                        ) : (
+                          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                        )}
+                        <span>{pwdMsg.text}</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </section>
 
-              {/* ZONA DE PELIGRO: ELIMINAR CUENTA Y TICKETS */}
-              <section className="rounded-2xl p-5 bg-[#1b0f14] border border-rose-500/35 space-y-3.5">
-                <div className="flex items-start gap-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-rose-500/15 border border-rose-500/35 flex items-center justify-center shrink-0">
-                    <AlertTriangle className="w-4 h-4 text-rose-400" />
+              {/* ACCESO DIRECTO: POLÍTICA DE PRIVACIDAD */}
+              <button
+                type="button"
+                onClick={() => setShowPolicyModal(true)}
+                className="w-full instrument-card rounded-2xl px-5 py-4 flex items-center justify-between gap-3 text-left hover:bg-white/[0.02]"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-500/12 border border-emerald-500/25 flex items-center justify-center shrink-0">
+                    <FileText className="w-4 h-4 text-emerald-400" />
                   </div>
-                  <div>
-                    <h2 className="text-sm font-semibold text-rose-300">
-                      Zona de Peligro — Eliminar Cuenta Permanentemente
-                    </h2>
-                    <p className="text-[11px] text-rose-200/80 mt-0.5 leading-relaxed">
-                      Acción irreversible (Derecho ARCO): borrará tu cuenta, tu foto de perfil, tus dispositivos confiables, sesiones activas y <strong>todos tus tickets de diagnóstico y sugerencias</strong>.
+                  <div className="min-w-0">
+                    <h2 className="text-sm font-semibold text-white">Política de Privacidad y Derechos ARCO</h2>
+                    <p className="text-[11px] text-slate-400 truncate">
+                      {VERSION_POLITICA} · Ley N.° 29733 y manejo de datos
                     </p>
                   </div>
                 </div>
+                <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />
+              </button>
 
-                <form onSubmit={handleDeleteInit} className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  <input
-                    type="password"
-                    value={delPwd}
-                    onChange={(e) => setDelPwd(e.target.value)}
-                    placeholder="Contraseña actual"
-                    className="bg-[#0f172a] border border-rose-900/70 focus:border-rose-400 rounded-xl px-3 py-2 text-xs text-white outline-none"
-                  />
-                  <input
-                    type="text"
-                    value={delConfirm}
-                    onChange={(e) => setDelConfirm(e.target.value)}
-                    placeholder="Escriba ELIMINAR para confirmar"
-                    className="bg-[#0f172a] border border-rose-900/70 focus:border-rose-400 rounded-xl px-3 py-2 text-xs text-white outline-none"
-                  />
-                  <button
-                    type="submit"
-                    disabled={delBusy}
-                    className="sm:col-span-2 py-2.5 rounded-xl bg-rose-700/85 hover:bg-rose-600 text-white font-semibold text-xs inline-flex items-center justify-center gap-1.5 disabled:opacity-50"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                    {delBusy && !delChallenge
-                      ? 'Enviando código OTP de confirmación…'
-                      : 'Paso 1: Solicitar Código OTP de Eliminación'}
-                  </button>
-                </form>
+              {/* DESPLEGABLE 2: ZONA DE PELIGRO — ELIMINAR CUENTA (OCULTO POR DEFECTO) */}
+              <section
+                className={`rounded-2xl overflow-hidden border transition-colors ${
+                  openSection === 'delete'
+                    ? 'bg-[#1b0f14] border-rose-500/45'
+                    : 'instrument-card border-rose-500/20'
+                }`}
+              >
+                <button
+                  type="button"
+                  onClick={() => toggleSection('delete')}
+                  aria-expanded={openSection === 'delete'}
+                  className="w-full px-5 py-4 flex items-center justify-between gap-3 text-left hover:bg-rose-500/[0.04]"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-xl bg-rose-500/12 border border-rose-500/30 flex items-center justify-center shrink-0">
+                      <AlertTriangle className="w-4 h-4 text-rose-400" />
+                    </div>
+                    <div className="min-w-0">
+                      <h2 className="text-sm font-semibold text-rose-300">Eliminar Cuenta Permanentemente</h2>
+                      <p className="text-[11px] text-slate-400 truncate">
+                        Zona de peligro · Borra perfil, sesiones y todos tus tickets
+                      </p>
+                    </div>
+                  </div>
+                  {openSection === 'delete' ? (
+                    <ChevronDown className="w-4 h-4 text-rose-400 shrink-0" />
+                  ) : (
+                    <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />
+                  )}
+                </button>
 
-                {delChallenge && (
-                  <form onSubmit={handleDeleteVerify} className="bg-[#12090d] border border-rose-500/45 rounded-xl p-3.5 space-y-2.5">
-                    <p className="text-[11px] text-rose-300 font-medium">
-                      Paso 2: Ingresa el código irreversible enviado a {delChallenge.maskedEmail}
+                {openSection === 'delete' && (
+                  <div className="px-5 pb-5 pt-2 border-t border-rose-500/25 space-y-3.5">
+                    <p className="text-[11px] text-rose-200/85 leading-relaxed bg-rose-950/40 border border-rose-500/25 rounded-xl p-3">
+                      Acción irreversible (Derecho ARCO): borrará permanentemente tu cuenta, tu foto de perfil, tus dispositivos confiables, sesiones activas y <strong>todos tus tickets de diagnóstico y sugerencias</strong>.
                     </p>
-                    <div className="flex gap-2">
+
+                    <form onSubmit={handleDeleteInit} className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <input
+                        type="password"
+                        value={delPwd}
+                        onChange={(e) => setDelPwd(e.target.value)}
+                        placeholder="Contraseña actual"
+                        className="bg-[#0f172a] border border-rose-900/70 focus:border-rose-400 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                      />
                       <input
                         type="text"
-                        inputMode="numeric"
-                        maxLength={6}
-                        value={delOtp}
-                        onChange={(e) => setDelOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                        placeholder="000000"
-                        className="w-36 bg-[#090c12] border border-rose-500/50 focus:border-rose-400 rounded-xl px-3 py-2 text-center font-mono text-base tracking-[0.3em] text-white outline-none"
+                        value={delConfirm}
+                        onChange={(e) => setDelConfirm(e.target.value)}
+                        placeholder="Escriba ELIMINAR para confirmar"
+                        className="bg-[#0f172a] border border-rose-900/70 focus:border-rose-400 rounded-xl px-3 py-2 text-xs text-white outline-none"
                       />
                       <button
                         type="submit"
-                        disabled={delBusy || delOtp.length !== 6}
-                        className="flex-1 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs disabled:opacity-50"
+                        disabled={delBusy}
+                        className="sm:col-span-2 py-2.5 rounded-xl bg-rose-700/85 hover:bg-rose-600 text-white font-semibold text-xs inline-flex items-center justify-center gap-1.5 disabled:opacity-50"
                       >
-                        {delBusy ? 'Eliminando…' : 'Eliminar Cuenta y Tickets'}
+                        <Trash2 className="w-4 h-4" />
+                        {delBusy && !delChallenge
+                          ? 'Enviando código OTP de confirmación…'
+                          : 'Paso 1: Solicitar Código OTP de Eliminación'}
                       </button>
-                    </div>
-                  </form>
-                )}
+                    </form>
 
-                {delMsg.text && (
-                  <div
-                    className={`flex items-start gap-2 text-xs rounded-xl p-2.5 border ${
-                      delMsg.type === 'ok'
-                        ? 'text-amber-300 bg-amber-500/10 border-amber-500/25'
-                        : 'text-rose-300 bg-rose-500/10 border-rose-500/25'
-                    }`}
-                  >
-                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                    <span>{delMsg.text}</span>
+                    {delChallenge && (
+                      <form onSubmit={handleDeleteVerify} className="bg-[#12090d] border border-rose-500/45 rounded-xl p-3.5 space-y-2.5">
+                        <p className="text-[11px] text-rose-300 font-medium">
+                          Paso 2: Ingresa el código irreversible enviado a {delChallenge.maskedEmail}
+                        </p>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            maxLength={6}
+                            value={delOtp}
+                            onChange={(e) => setDelOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                            placeholder="000000"
+                            className="w-36 bg-[#090c12] border border-rose-500/50 focus:border-rose-400 rounded-xl px-3 py-2 text-center font-mono text-base tracking-[0.3em] text-white outline-none"
+                          />
+                          <button
+                            type="submit"
+                            disabled={delBusy || delOtp.length !== 6}
+                            className="flex-1 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs disabled:opacity-50"
+                          >
+                            {delBusy ? 'Eliminando…' : 'Eliminar Cuenta y Tickets'}
+                          </button>
+                        </div>
+                      </form>
+                    )}
+
+                    {delMsg.text && (
+                      <div
+                        className={`flex items-start gap-2 text-xs rounded-xl p-2.5 border ${
+                          delMsg.type === 'ok'
+                            ? 'text-amber-300 bg-amber-500/10 border-amber-500/25'
+                            : 'text-rose-300 bg-rose-500/10 border-rose-500/25'
+                        }`}
+                      >
+                        <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                        <span>{delMsg.text}</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </section>

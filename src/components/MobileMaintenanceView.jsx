@@ -185,27 +185,7 @@ export default function MobileMaintenanceView({ deviceInfo, user }) {
           thermalStatus: thermal?.thermalStatus || 'Nominal',
         };
         setCoolingReport(summary);
-
-        if (user?.dni && deviceInfo) {
-          const deltaText =
-            delta != null
-              ? `${startTemp}°C → ${endTemp}°C (${delta <= 0 ? `${delta}°C` : `+${delta}°C`})`
-              : `Estado térmico: ${summary.thermalStatus}`;
-          recordMobileEvent({
-            user,
-            deviceInfo: { ...deviceInfo, batteryTempC: endTemp ?? deviceInfo.batteryTempC },
-            tipoEvento: 'Enfriamiento Térmico',
-            prefix: 'MANT',
-            healthScore: endTemp != null && endTemp >= 41 ? 74 : 94,
-            diagnostico: `Sesión de enfriamiento guiado (60 s) — ${deltaText}`,
-            solucion:
-              endTemp != null && endTemp >= 40
-                ? 'Temperatura aún elevada: desconecta carga rápida, reduce brillo y restringe apps activas.'
-                : 'Temperatura en rango seguro tras monitoreo activo de 60 s.',
-          }).then((tid) => {
-            if (tid) flashNotice(`Sesión térmica registrada en tu historial: ${tid}`);
-          });
-        }
+        flashNotice('Sesión de enfriamiento completada (guardado en nube desactivado por defecto).');
       }
     }, 1000);
   };
@@ -224,19 +204,6 @@ export default function MobileMaintenanceView({ deviceInfo, user }) {
           : `Caché interna de IndiServ limpiada: ${kb} KB liberados.`;
       setCacheMessage(text);
       fetchThermal();
-
-      if (user?.dni && deviceInfo && kb > 0) {
-        const tid = await recordMobileEvent({
-          user,
-          deviceInfo,
-          tipoEvento: 'Mantenimiento Android',
-          prefix: 'MANT',
-          healthScore: 95,
-          diagnostico: `Limpieza de caché interna IndiServ (${kb >= 1024 ? `${mb.toFixed(2)} MB` : `${kb} KB`} liberados)`,
-          solucion: 'Se vaciaron cacheDir y externalCacheDir de la aplicación de forma segura.',
-        });
-        if (tid) flashNotice(`Mantenimiento guardado en tu historial: ${tid}`);
-      }
     } catch {
       setCacheMessage('No se pudo limpiar la caché interna.');
     } finally {
@@ -342,19 +309,6 @@ export default function MobileMaintenanceView({ deviceInfo, user }) {
 
       setDeleteFeedback(`✔ Eliminados ${deletedCount} archivo(s) seleccionados (${freedMb.toFixed(2)} MB liberados).`);
       setSelectedPaths(new Set());
-
-      if (deletedCount > 0 && user?.dni && deviceInfo) {
-        const tid = await recordMobileEvent({
-          user,
-          deviceInfo,
-          tipoEvento: 'Mantenimiento Android',
-          prefix: 'MANT',
-          healthScore: 96,
-          diagnostico: `Limpieza selectiva de almacenamiento (${deletedCount} archivos · ${freedMb.toFixed(2)} MB liberados)`,
-          solucion: 'Archivos seleccionados en Download/Documents eliminados con confirmación del operador.',
-        });
-        if (tid) flashNotice(`Limpieza registrada en tu historial privado: ${tid}`);
-      }
 
       await handleScanFiles();
     } catch {

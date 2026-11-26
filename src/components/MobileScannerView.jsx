@@ -19,6 +19,7 @@ import {
   Cpu, BatteryCharging, Wifi, Smartphone, MonitorPlay, Play, Square,
   Activity, RefreshCw, HardDrive, MemoryStick, ShieldCheck, Thermometer,
   Sparkles, CheckCircle2, AlertTriangle, ShieldAlert, Box, Zap, Stethoscope, Snowflake,
+  CloudUpload,
 } from 'lucide-react';
 
 const HardwareInfo = registerPlugin('HardwareInfo');
@@ -94,9 +95,15 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
   const [stressMops, setStressMops] = useState(0);
   const [stressLogs, setStressLogs] = useState([]);
   const [stressStatus, setStressStatus] = useState('EN ESPERA');
+  const [lastStressSummary, setLastStressSummary] = useState(null);
+  const [savingScan, setSavingScan] = useState(false);
+  const [savedScanId, setSavedScanId] = useState(null);
+  const [savingAi, setSavingAi] = useState(false);
+  const [savedAiId, setSavedAiId] = useState(null);
+  const [savingStress, setSavingStress] = useState(false);
+  const [savedStressId, setSavedStressId] = useState(null);
   const workersRef = useRef([]);
   const timerRef = useRef(null);
-  const lastScanRecordAtRef = useRef(0);
   const aiEnrichedRef = useRef(false);
 
   const scanDevice = async () => {
@@ -195,6 +202,15 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
         cpuGovernor: nativeHw?.cpuGovernor || '',
         cpuCores: nativeHw?.cpuCores || navigator.hardwareConcurrency || 4,
         cpuMaxFreqMhz: nativeHw?.cpuMaxFreqMhz || 0,
+        cpuCurFreqMhz: nativeHw?.cpuCurFreqMhz || 0,
+        cpuFeatures: nativeHw?.cpuFeatures || '',
+        cpuVariant: nativeHw?.cpuVariant || '',
+        cpuRevision: nativeHw?.cpuRevision || '',
+        cpuBogoMips: nativeHw?.cpuBogoMips || '',
+        cpuCaches: nativeHw?.cpuCaches || null,
+        thermalCode: nativeHw?.thermalCode ?? 0,
+        thermalStatus: nativeHw?.thermalStatus || 'Nominal',
+        bootloader: nativeHw?.bootloader || '',
         cpuArch: rawHwForCatalog.cpuArch,
         supportedAbis: nativeHw?.supportedAbis || '',
         ramTotalGb,
@@ -276,22 +292,7 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
           .catch(() => {});
       }
 
-      const nowMs = Date.now();
-      if (user?.dni && nowMs - lastScanRecordAtRef.current > 4000) {
-        lastScanRecordAtRef.current = nowMs;
-        const battOk = scannedData.batteryTempC == null || scannedData.batteryTempC < 40;
-        const storOk = scannedData.storageUsedPct == null || scannedData.storageUsedPct < 88;
-        const score = battOk && storOk ? 95 : 78;
-        recordMobileEvent({
-          user,
-          deviceInfo: scannedData,
-          tipoEvento: 'Escaneo Android',
-          prefix: 'SCAN',
-          healthScore: score,
-          diagnostico: `Escaneo de hardware — ${scannedData.commercialName} (${scannedData.os})`,
-          solucion: `SoC ${scannedData.commercialSoc} · RAM ${scannedData.ramTotalGb ?? '?'} GB · Almacenamiento ${scannedData.storageTotalGb ?? '?'} GB · Batería ${scannedData.batteryPct ?? '?'}% (${scannedData.batteryHealth}).`,
-        });
-      }
+      setSavedScanId(null);
     } finally {
       setScanning(false);
     }
@@ -302,9 +303,80 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
     return () => stopStress();
   }, []);
 
+  const handleSaveScanTicket = async () => {
+    if (!info || !user?.dni || savingScan) return;
+    setSavingScan(true);
+    try {
+      const battOk = info.batteryTempC == null || info.batteryTempC < 40;
+      const storOk = info.storageUsedPct == null || info.storageUsedPct < 88;
+      const thermOk = (info.thermalCode ?? 0) < 2;
+      const score = battOk && storOk && thermOk ? 95 : 76;
+      const tid = await recordMobileEvent({
+        user,
+        deviceInfo: info,
+        tipoEvento: 'Escaneo CPU-Z Android',
+        prefix: 'SCAN',
+        healthScore: score,
+        diagnostico: `Perfil CPU-Z — ${info.commercialName} (${info.os} · Térmica: ${info.thermalStatus || 'Nominal'})`,
+        solucion: `SoC ${info.commercialSoc} (${info.cpuCores}C @ ${info.cpuMaxFreqMhz ? `${(info.cpuMaxFreqMhz / 1000).toFixed(2)} GHz` : 'ARM'}) · RAM ${info.ramTotalGb ?? '?'} GB (${info.ramUsedPct ?? '?'}%) · Almacenamiento ${info.storageTotalGb ?? '?'} GB · Batería ${info.batteryPct ?? '?'}% (${info.batteryHealth}${info.batteryTempC != null ? ` · ${info.batteryTempC}°C` : ''}).`,
+      });
+      setSavedScanId(tid || 'GUARDADO');
+    } finally {
+      setSavingScan(false);
+    }
+  };
+
+  const handleSaveAiTicket = async () => {
+    if (!info || !aiAudit || !user?.dni || savingAi) return;
+    setSavingAi(true);
+    try {
+      const aiScore =
+        aiAudit.veredicto === 'Original Coherente'
+          ? 96
+          : aiAudit.veredicto?.includes('Modificado')
+          ? 70
+          : 45;
+      const tid = await recordMobileEvent({
+        user,
+        deviceInfo: info,
+        tipoEvento: 'Auditoría IA',
+        prefix: 'IA',
+        healthScore: aiScore,
+        diagnostico: `${aiAudit.nombre_comercial} — ${aiAudit.veredicto} (${aiAudit.confianza_pct ?? 85}%)`,
+        solucion: aiAudit.resumen || 'Auditoría de autenticidad completada.',
+      });
+      setSavedAiId(tid || 'GUARDADO');
+    } finally {
+      setSavingAi(false);
+    }
+  };
+
+  const handleSaveStressTicket = async () => {
+    if (!info || !lastStressSummary || !user?.dni || savingStress) return;
+    setSavingStress(true);
+    try {
+      const tid = await recordMobileEvent({
+        user,
+        deviceInfo: info,
+        tipoEvento: 'Micro-Stress CPU',
+        prefix: 'STRESS',
+        healthScore: 94,
+        diagnostico: `Micro-Stress CPU Móvil (${lastStressSummary.nWorkers} hilos · ${lastStressSummary.mops.toFixed(2)} Mops/s · ESTABLE)`,
+        solucion: `Prueba de carga completada durante ${lastStressSummary.durationSec}s en ${info.cpuName || 'SoC'} sin bloqueos.`,
+      });
+      if (tid) {
+        setSavedStressId(tid);
+        setStressLogs((prev) => [...prev, `✔ Ticket guardado en historial privado: ${tid}`]);
+      }
+    } finally {
+      setSavingStress(false);
+    }
+  };
+
   const verifyWithAI = async () => {
     if (!info || aiLoading) return;
     setAiLoading(true);
+    setSavedAiId(null);
     try {
       const { data, error } = await supabase.functions.invoke('analizar-dispositivo-ia', {
         body: { telemetry: info },
@@ -327,23 +399,6 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
         auditResult = runLocalDeviceAudit(info);
       }
       setAiAudit(auditResult);
-      if (user?.dni && auditResult) {
-        const aiScore =
-          auditResult.veredicto === 'Original Coherente'
-            ? 96
-            : auditResult.veredicto?.includes('Modificado')
-            ? 70
-            : 45;
-        recordMobileEvent({
-          user,
-          deviceInfo: info,
-          tipoEvento: 'Auditoría IA',
-          prefix: 'IA',
-          healthScore: aiScore,
-          diagnostico: `${auditResult.nombre_comercial} — ${auditResult.veredicto} (${auditResult.confianza_pct ?? 85}%)`,
-          solucion: auditResult.resumen || 'Auditoría de autenticidad completada.',
-        });
-      }
     } catch {
       const fb = runLocalDeviceAudit(info);
       setAiAudit(fb);
@@ -381,6 +436,8 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
     setStressRunning(true);
     setStressProgress(0);
     setStressMops(0);
+    setLastStressSummary(null);
+    setSavedStressId(null);
     setStressStatus('CARGANDO ~90%');
     setStressLogs([
       `[CPU] ${info?.cpuName || 'SoC Móvil'} · ${info?.cpuArch || 'ARM64'} (${nWorkers} hilos)`,
@@ -419,25 +476,12 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
         URL.revokeObjectURL(url);
         setStressProgress(100);
         setStressStatus('COMPLETADO · ESTABLE');
+        setLastStressSummary({ nWorkers, mops, durationSec });
         setStressLogs((prev) => [
           ...prev,
           `✔ Prueba completada sin bloqueos (${mops.toFixed(2)} Mops/s finales).`,
+          'ℹ Pulse "Guardar Ticket" si desea archivar este resultado en la nube.',
         ]);
-        if (user?.dni && info) {
-          recordMobileEvent({
-            user,
-            deviceInfo: info,
-            tipoEvento: 'Micro-Stress CPU',
-            prefix: 'STRESS',
-            healthScore: 94,
-            diagnostico: `Micro-Stress CPU Móvil (${nWorkers} hilos · ${mops.toFixed(2)} Mops/s · ESTABLE)`,
-            solucion: `Prueba de carga completada durante ${durationSec}s en ${info.cpuName || 'SoC'} sin bloqueos.`,
-          }).then((tid) => {
-            if (tid) {
-              setStressLogs((prev) => [...prev, `✔ Reporte guardado en historial privado: ${tid}`]);
-            }
-          });
-        }
       }
     }, 500);
   };
@@ -500,6 +544,17 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
                 </button>
               </div>
             )}
+            {info && user?.dni && (
+              <button
+                onClick={handleSaveScanTicket}
+                disabled={savingScan || Boolean(savedScanId)}
+                className="py-2 px-3 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 text-xs font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-60"
+                title="Guardar escaneo CPU-Z en tu historial de tickets"
+              >
+                <CloudUpload className="w-3.5 h-3.5" />
+                {savingScan ? 'Guardando…' : savedScanId ? `✔ ${savedScanId.slice(-6)}` : 'Guardar Ticket'}
+              </button>
+            )}
             <button
               onClick={scanDevice}
               disabled={scanning}
@@ -551,7 +606,9 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
                           </span>
                           <span className="text-slate-300 shrink-0">
                             {cl.maxFreqMhz > 0
-                              ? cl.minFreqMhz > 0
+                              ? cl.curFreqMhz > 0
+                                ? `${cl.curFreqMhz} / ${cl.maxFreqMhz} MHz`
+                                : cl.minFreqMhz > 0
                                 ? `${cl.minFreqMhz}–${cl.maxFreqMhz} MHz`
                                 : `@ ${(cl.maxFreqMhz / 1000).toFixed(2)} GHz`
                               : 'ARM64'}
@@ -560,6 +617,42 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
                       ))}
                     </div>
                   </div>
+                )}
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px] font-mono">
+                  <div className="bg-[#0b0f19] border border-slate-800/80 rounded-lg px-2.5 py-1.5">
+                    <span className="text-[9px] text-slate-500 block uppercase">Reloj Actual</span>
+                    <span className="text-slate-200 font-semibold">
+                      {info.cpuCurFreqMhz ? `${info.cpuCurFreqMhz} MHz` : info.cpuMaxFreqMhz ? `≤ ${info.cpuMaxFreqMhz} MHz` : 'N/D'}
+                    </span>
+                  </div>
+                  <div className="bg-[#0b0f19] border border-slate-800/80 rounded-lg px-2.5 py-1.5">
+                    <span className="text-[9px] text-slate-500 block uppercase">Cachés L1/L2/L3</span>
+                    <span className="text-slate-200 font-semibold truncate block">
+                      {info.cpuCaches && Object.keys(info.cpuCaches).length > 0
+                        ? [info.cpuCaches.l1d && `L1 ${info.cpuCaches.l1d}`, info.cpuCaches.l2 && `L2 ${info.cpuCaches.l2}`, info.cpuCaches.l3 && `L3 ${info.cpuCaches.l3}`].filter(Boolean).join(' · ')
+                        : 'SoC Integrada'}
+                    </span>
+                  </div>
+                  <div className="bg-[#0b0f19] border border-slate-800/80 rounded-lg px-2.5 py-1.5">
+                    <span className="text-[9px] text-slate-500 block uppercase">Estado Térmico</span>
+                    <span className={`font-semibold ${(info.thermalCode ?? 0) >= 2 ? 'text-rose-300' : 'text-emerald-300'}`}>
+                      {info.thermalStatus || 'Nominal'}
+                    </span>
+                  </div>
+                  <div className="bg-[#0b0f19] border border-slate-800/80 rounded-lg px-2.5 py-1.5">
+                    <span className="text-[9px] text-slate-500 block uppercase">Rev. / Bootloader</span>
+                    <span className="text-slate-200 font-semibold truncate block">
+                      {info.cpuRevision ? `r${info.cpuVariant || 0}p${info.cpuRevision}` : (info.bootloader || 'Oficial')}
+                    </span>
+                  </div>
+                </div>
+
+                {info.cpuFeatures && (
+                  <p className="text-[10px] font-mono text-slate-400 bg-[#0b0f19] border border-slate-800/80 rounded-lg px-2.5 py-1.5 leading-relaxed">
+                    <span className="text-cyan-400 font-semibold">ISA ARM:</span>{' '}
+                    {info.cpuFeatures.toUpperCase().split(/\s+/).slice(0, 16).join(', ')}
+                  </p>
                 )}
 
                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-400 font-mono">
@@ -849,6 +942,18 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
                     ℹ {aiAudit.nota_fisica}
                   </p>
                 )}
+
+                {user?.dni && (
+                  <button
+                    type="button"
+                    onClick={handleSaveAiTicket}
+                    disabled={savingAi || Boolean(savedAiId)}
+                    className="w-full py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 text-xs font-semibold flex items-center justify-center gap-1.5 disabled:opacity-60"
+                  >
+                    <CloudUpload className="w-3.5 h-3.5" />
+                    {savingAi ? 'Guardando Auditoría…' : savedAiId ? `✔ Guardado en Nube (${savedAiId})` : 'Guardar Auditoría como Ticket'}
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -889,12 +994,25 @@ export default function MobileScannerView({ user, onDeviceScanned, onOpenPhone3D
 
           <div className="flex gap-2">
             {!stressRunning ? (
-              <button
-                onClick={startStress}
-                className="flex-1 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold flex items-center justify-center gap-2 transition-colors"
-              >
-                <Play className="w-3.5 h-3.5" /> Iniciar Stress Test (8 s)
-              </button>
+              <>
+                <button
+                  onClick={startStress}
+                  className="flex-1 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold flex items-center justify-center gap-2 transition-colors"
+                >
+                  <Play className="w-3.5 h-3.5" /> Iniciar Stress Test (8 s)
+                </button>
+                {lastStressSummary && user?.dni && (
+                  <button
+                    type="button"
+                    onClick={handleSaveStressTicket}
+                    disabled={savingStress || Boolean(savedStressId)}
+                    className="px-3.5 py-2.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 text-xs font-semibold flex items-center justify-center gap-1.5 disabled:opacity-60"
+                  >
+                    <CloudUpload className="w-3.5 h-3.5" />
+                    {savingStress ? '…' : savedStressId ? '✔ Guardado' : 'Guardar Ticket'}
+                  </button>
+                )}
+              </>
             ) : (
               <button
                 onClick={() => {

@@ -11,6 +11,7 @@ import android.content.res.Configuration;
 import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Environment;
+import android.os.PowerManager;
 import android.os.StatFs;
 import android.provider.Settings;
 import android.util.DisplayMetrics;
@@ -112,6 +113,10 @@ public class HardwareInfoPlugin extends Plugin {
     private static class CpuInfoParsed {
         String hardware = "";
         String modelName = "";
+        String features = "";
+        String cpuVariant = "";
+        String cpuRevision = "";
+        String bogoMips = "";
         Map<Integer, String> coreImplementer = new HashMap<>();
         Map<Integer, String> corePart = new HashMap<>();
     }
@@ -138,6 +143,14 @@ public class HardwareInfoPlugin extends Plugin {
                     out.hardware = val;
                 } else if (key.equals("model name") && out.modelName.isEmpty() && !val.matches("\\d+")) {
                     out.modelName = val;
+                } else if (key.equals("features") && out.features.isEmpty()) {
+                    out.features = val;
+                } else if (key.equals("cpu variant") && out.cpuVariant.isEmpty()) {
+                    out.cpuVariant = val;
+                } else if (key.equals("cpu revision") && out.cpuRevision.isEmpty()) {
+                    out.cpuRevision = val;
+                } else if (key.equals("bogomips") && out.bogoMips.isEmpty()) {
+                    out.bogoMips = val;
                 } else if (key.equals("cpu implementer") && currentProc >= 0) {
                     out.coreImplementer.put(currentProc, val);
                 } else if (key.equals("cpu part") && currentProc >= 0) {
@@ -147,6 +160,42 @@ public class HardwareInfoPlugin extends Plugin {
         } catch (Exception ignored) {
         }
         return out;
+    }
+
+    private JSObject readCpuCaches() {
+        JSObject caches = new JSObject();
+        try {
+            File cacheDir = new File("/sys/devices/system/cpu/cpu0/cache");
+            if (!cacheDir.exists() || !cacheDir.isDirectory()) return caches;
+            File[] dirs = cacheDir.listFiles();
+            if (dirs == null) return caches;
+            for (File d : dirs) {
+                if (!d.isDirectory() || !d.getName().startsWith("index")) continue;
+                String lvl = readSingleLineFile(new File(d, "level").getAbsolutePath());
+                String type = readSingleLineFile(new File(d, "type").getAbsolutePath()).toLowerCase(Locale.ROOT);
+                String size = readSingleLineFile(new File(d, "size").getAbsolutePath());
+                if (lvl.isEmpty() || size.isEmpty()) continue;
+                if (lvl.equals("1") && type.contains("data")) caches.put("l1d", size);
+                else if (lvl.equals("1") && type.contains("inst")) caches.put("l1i", size);
+                else if (lvl.equals("2")) caches.put("l2", size);
+                else if (lvl.equals("3")) caches.put("l3", size);
+            }
+        } catch (Exception ignored) {
+        }
+        return caches;
+    }
+
+    private String mapThermalStatus(int code) {
+        switch (code) {
+            case 0: return "Nominal";
+            case 1: return "Ligero";
+            case 2: return "Moderado";
+            case 3: return "Severo";
+            case 4:
+            case 5:
+            case 6: return "Crítico";
+            default: return "Nominal";
+        }
     }
 
     private JSArray buildCpuClusters(int cores, CpuInfoParsed parsed) {
@@ -160,6 +209,7 @@ public class HardwareInfoPlugin extends Plugin {
             String arch = mapArmCoreName(imp, part);
             int maxMhz = readCpuFreqMhz(i, "cpuinfo_max_freq");
             int minMhz = readCpuFreqMhz(i, "cpuinfo_min_freq");
+            int curMhz = readCpuFreqMhz(i, "scaling_cur_freq");
 
             if (!arch.isEmpty() || maxMhz > 0) {
                 hasRealTopologyData = true;
@@ -169,13 +219,16 @@ public class HardwareInfoPlugin extends Plugin {
 
             int[] stats = clusterStats.get(key);
             if (stats == null) {
-                stats = new int[]{1, minMhz, maxMhz};
+                stats = new int[]{1, minMhz, maxMhz, curMhz};
                 clusterStats.put(key, stats);
                 clusterArch.put(key, displayArch);
             } else {
                 stats[0] += 1;
                 if (minMhz > 0 && (stats[1] == 0 || minMhz < stats[1])) {
                     stats[1] = minMhz;
+                }
+                if (curMhz > stats[3]) {
+                    stats[3] = curMhz;
                 }
             }
         }
@@ -193,6 +246,7 @@ public class HardwareInfoPlugin extends Plugin {
             obj.put("archName", clusterArch.get(entry.getKey()));
             obj.put("minFreqMhz", st[1]);
             obj.put("maxFreqMhz", st[2]);
+            obj.put("curFreqMhz", st[3]);
             list.add(obj);
         }
 
@@ -411,10 +465,30 @@ public class HardwareInfoPlugin extends Plugin {
         ret.put("chipName", chipName);
         ret.put("cpuCores", cores);
         ret.put("cpuMaxFreqMhz", maxFreqMhz);
+        ret.put("cpuCurFreqMhz", readCpuFreqMhz(0, "scaling_cur_freq"));
         ret.put("cpuArch", primaryAbi);
         ret.put("supportedAbis", String.join(", ", Arrays.asList(abis)));
         ret.put("cpuClusters", cpuClusters);
         ret.put("cpuGovernor", cpuGovernor);
+        ret.put("cpuFeatures", cpuParsed.features);
+        ret.put("cpuVariant", cpuParsed.cpuVariant);
+        ret.put("cpuRevision", cpuParsed.cpuRevision);
+        ret.put("cpuBogoMips", cpuParsed.bogoMips);
+        ret.put("cpuCaches", readCpuCaches());
+        ret.put("bootloader", Build.BOOTLOADER != null ? Build.BOOTLOADER : "N/D");
+
+        int thermalCode = 0;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                PowerManager pm = (PowerManager) ctx.getSystemService(Context.POWER_SERVICE);
+                if (pm != null) {
+                    thermalCode = pm.getCurrentThermalStatus();
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        ret.put("thermalCode", thermalCode);
+        ret.put("thermalStatus", mapThermalStatus(thermalCode));
 
         try {
             ActivityManager am = (ActivityManager) ctx.getSystemService(Context.ACTIVITY_SERVICE);

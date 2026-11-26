@@ -59,28 +59,59 @@ export default function MobileDiagnosticView({ deviceInfo, user, onOpenPhone3D }
     return map;
   }, [allCases]);
 
-  // Auto-triaje en vivo basado en la telemetría real del dispositivo
+  // Auto-triaje profundo estilo CPU-Z basado en la telemetría real del dispositivo Android
   const liveAlerts = useMemo(() => {
     if (!deviceInfo) return [];
     const alerts = [];
     if (deviceInfo.batteryTempC != null && deviceInfo.batteryTempC >= 39) {
       alerts.push({
-        label: `Temperatura batería elevada (${deviceInfo.batteryTempC}°C)`,
+        label: `Temperatura batería elevada (${deviceInfo.batteryTempC}°C · ${deviceInfo.batteryVoltageMv ? `${(deviceInfo.batteryVoltageMv / 1000).toFixed(2)}V` : 'Li-ion'})`,
         code: 'MOB-BAT-03',
         severity: deviceInfo.batteryTempC >= 43 ? 'Crítica' : 'Alta',
       });
     }
+    if ((deviceInfo.thermalCode ?? 0) >= 2) {
+      alerts.push({
+        label: `Throttling térmico activo en ${deviceInfo.commercialSoc || deviceInfo.cpuName || 'SoC'} (Estado: ${deviceInfo.thermalStatus})`,
+        code: 'MOB-PERF-01',
+        severity: deviceInfo.thermalCode >= 3 ? 'Crítica' : 'Alta',
+      });
+    }
+    if (Array.isArray(deviceInfo.cpuClusters) && deviceInfo.cpuClusters.length > 0) {
+      const big = deviceInfo.cpuClusters[0];
+      if (big.maxFreqMhz > 0 && big.curFreqMhz > 0 && big.curFreqMhz < big.maxFreqMhz * 0.45 && (deviceInfo.batteryTempC ?? 0) >= 38) {
+        alerts.push({
+          label: `Recorte de reloj en clúster principal ${big.archName} (${big.curFreqMhz}/${big.maxFreqMhz} MHz bajo calor)`,
+          code: 'MOB-PERF-01',
+          severity: 'Alta',
+        });
+      }
+    }
+    if (deviceInfo.batteryVoltageMv != null && deviceInfo.batteryVoltageMv >= 4480) {
+      alerts.push({
+        label: `Voltaje de celda elevado (${(deviceInfo.batteryVoltageMv / 1000).toFixed(2)} V · revisar cargador/PMIC)`,
+        code: 'MOB-BAT-02',
+        severity: 'Alta',
+      });
+    }
     if (deviceInfo.storageUsedPct != null && deviceInfo.storageUsedPct >= 82) {
       alerts.push({
-        label: `Almacenamiento al ${deviceInfo.storageUsedPct}% (${deviceInfo.storageAvailGb ?? '?'} GB libres)`,
+        label: `Almacenamiento UFS al ${deviceInfo.storageUsedPct}% (${deviceInfo.storageAvailGb ?? '?'} GB libres de ${deviceInfo.storageTotalGb ?? '?'} GB)`,
         code: 'MOB-MEM-01',
         severity: deviceInfo.storageUsedPct >= 92 ? 'Crítica' : 'Alta',
       });
     }
     if (deviceInfo.ramUsedPct != null && deviceInfo.ramUsedPct >= 82) {
       alerts.push({
-        label: `Alta presión de RAM (${deviceInfo.ramUsedPct}% en uso)`,
+        label: `Alta presión de RAM (${deviceInfo.ramUsedPct}% · ${deviceInfo.ramAvailGb ?? '?'} GB libres de ${deviceInfo.ramTotalGb ?? '?'} GB)`,
         code: 'MOB-MEM-02',
+        severity: 'Media',
+      });
+    }
+    if (deviceInfo.cpuArch && !String(deviceInfo.cpuArch).includes('64')) {
+      alerts.push({
+        label: `Arquitectura 32-bit (${deviceInfo.cpuArch}): rendimiento y compatibilidad limitados en apps modernas`,
+        code: 'MOB-PERF-02',
         severity: 'Media',
       });
     }
@@ -447,20 +478,47 @@ export default function MobileDiagnosticView({ deviceInfo, user, onOpenPhone3D }
                 </div>
               </div>
 
-              {/* Acciones del Dictamen: Guardar en Reporte Global + Ver en 3D */}
+              {/* Perfil Técnico CPU-Z Verificado en Este Equipo */}
+              {deviceInfo && (
+                <div className="bg-[#0b0f19] border border-cyan-500/20 rounded-xl p-3.5 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-cyan-400">
+                      Perfil Técnico CPU-Z Verificado en Este Equipo
+                    </span>
+                    <span className="text-[10px] font-mono text-slate-400">
+                      Térmica: <strong className={(deviceInfo.thermalCode ?? 0) >= 2 ? 'text-rose-300' : 'text-emerald-300'}>{deviceInfo.thermalStatus || 'Nominal'}</strong>
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[11px] font-mono text-slate-300">
+                    <div>SoC: <strong className="text-white">{deviceInfo.commercialSoc || deviceInfo.cpuName || 'ARM64'}</strong></div>
+                    <div>Núcleos / Reloj: <strong className="text-white">{deviceInfo.cpuCores || '?'}C {deviceInfo.cpuCurFreqMhz ? `(${deviceInfo.cpuCurFreqMhz}/${deviceInfo.cpuMaxFreqMhz || '?'} MHz)` : deviceInfo.cpuMaxFreqMhz ? `@ ${(deviceInfo.cpuMaxFreqMhz / 1000).toFixed(2)} GHz` : ''}</strong></div>
+                    <div>RAM / UFS: <strong className="text-white">{deviceInfo.ramTotalGb ?? '?'} GB ({deviceInfo.ramUsedPct ?? '?'}%) · {deviceInfo.storageAvailGb ?? '?'} GB libres</strong></div>
+                    <div>Batería: <strong className="text-white">{deviceInfo.batteryPct ?? '?'}% · {deviceInfo.batteryTempC != null ? `${deviceInfo.batteryTempC}°C` : 'N/D'} · {deviceInfo.batteryVoltageMv ? `${(deviceInfo.batteryVoltageMv / 1000).toFixed(2)}V` : 'N/D'}</strong></div>
+                    <div>Pantalla / GPU: <strong className="text-white">{deviceInfo.screenRes || 'N/D'} · {deviceInfo.gpu || 'GPU'}</strong></div>
+                    <div>Seguridad: <strong className="text-white">{deviceInfo.os} · Parche {deviceInfo.securityPatch || 'N/D'}</strong></div>
+                  </div>
+                  {deviceInfo.cpuFeatures && (
+                    <p className="text-[10px] font-mono text-slate-400 pt-1 border-t border-slate-800/80 truncate">
+                      ISA: {deviceInfo.cpuFeatures.toUpperCase().split(/\s+/).slice(0, 12).join(', ')}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Acciones del Dictamen: Guardar en Reporte Global (manual) + Ver en 3D */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2">
                 <button
                   type="button"
-                  disabled={savingTicket}
+                  disabled={savingTicket || Boolean(savedTicketId)}
                   onClick={handleSaveCloudReport}
                   className="py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-[#03160f] font-semibold text-xs flex items-center justify-center gap-2 disabled:opacity-60"
                 >
                   <CloudUpload className="w-4 h-4" />
                   {savingTicket
-                    ? 'Guardando Reporte…'
+                    ? 'Guardando Ticket…'
                     : savedTicketId
-                    ? `Guardado (${savedTicketId})`
-                    : 'Guardar en Reporte Global'}
+                    ? `✔ Guardado (${savedTicketId})`
+                    : 'Guardar Ticket en la Nube'}
                 </button>
                 {onOpenPhone3D && (
                   <button
