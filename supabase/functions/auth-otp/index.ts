@@ -64,6 +64,8 @@ const MAX_AVATAR_BODY_BYTES = 120 * 1024;
 const MAX_AVATAR_DECODED_BYTES = 75_000;
 const PBKDF2_ITERATIONS = 210_000;
 const LEGACY_SALT_NAMESPACE = "INDISERV_SALT_2026";
+const DUMMY_PBKDF2_HASH =
+  "indiserv_pbkdf2$210000$00112233445566778899aabbccddeeff$0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 const HONEY_DNIS = new Set(["00000000", "99999999", "12345678", "87654321", "11111111", "admin", "root"]);
 const HONEY_EMAILS = new Set([
@@ -93,12 +95,34 @@ function getCorsHeaders(req: Request): Record<string, string> {
 }
 
 function getClientIp(req: Request): string {
+  // Si viene del proxy Vercel autenticado por secreto compartido en tiempo constante, usar la IP real del visitante
+  const expectedProxySecret = (Deno.env.get("VERCEL_PROXY_SECRET") || "").trim();
+  const providedProxySecret = (req.headers.get("x-proxy-secret") || "").trim();
+  const forwardedClientIp = (req.headers.get("x-indiserv-client-ip") || "").trim();
+  if (
+    expectedProxySecret.length >= 16 &&
+    providedProxySecret.length === expectedProxySecret.length &&
+    timingSafeEqualStr(providedProxySecret, expectedProxySecret) &&
+    /^[0-9a-fA-F:.]{3,64}$/.test(forwardedClientIp)
+  ) {
+    return forwardedClientIp;
+  }
   // Prioriza cabeceras inyectadas por el proxy de borde (sin aceptar x-forwarded-for falsificable)
   return (
     req.headers.get("cf-connecting-ip")?.trim() ||
     req.headers.get("x-real-ip")?.trim() ||
     "edge-anon"
   );
+}
+
+async function ensureMinElapsedMs(startedMs: number, minMs: number, jitterMs = 60): Promise<void> {
+  const buf = new Uint16Array(1);
+  crypto.getRandomValues(buf);
+  const target = minMs + (buf[0] % Math.max(1, jitterMs));
+  const wait = Math.max(0, Math.round(target - (performance.now() - startedMs)));
+  if (wait > 0) {
+    await new Promise((r) => setTimeout(r, wait));
+  }
 }
 
 function timingSafeEqualStr(a: string, b: string): boolean {
@@ -123,7 +147,11 @@ async function computeLegacyV1Hash(dni: string, plainPassword: string): Promise<
   return `indiserv_v1$${await sha256Hex(raw)}`;
 }
 
-async function hashPasswordPbkdf2(secretInput: string, pepper: string): Promise<string> {
+async function hashPasswordPbkdf2(
+  secretInput: string,
+  pepper: string,
+  prefix: "indiserv_pbkdf2" | "indiserv_pbkdf2_v1" = "indiserv_pbkdf2"
+): Promise<string> {
   const salt = new Uint8Array(16);
   crypto.getRandomValues(salt);
   const keyMat = await crypto.subtle.importKey(
@@ -138,12 +166,12 @@ async function hashPasswordPbkdf2(secretInput: string, pepper: string): Promise<
     keyMat,
     256
   );
-  return `indiserv_pbkdf2$${PBKDF2_ITERATIONS}$${toHex(salt)}$${toHex(bits)}`;
+  return `${prefix}$${PBKDF2_ITERATIONS}$${toHex(salt)}$${toHex(bits)}`;
 }
 
 async function verifyPasswordPbkdf2(secretInput: string, stored: string, pepper: string): Promise<boolean> {
   const parts = stored.split("$");
-  if (parts.length !== 4 || parts[0] !== "indiserv_pbkdf2") return false;
+  if (parts.length !== 4 || (parts[0] !== "indiserv_pbkdf2" && parts[0] !== "indiserv_pbkdf2_v1")) return false;
   const iterations = Number(parts[1]);
   const saltHex = parts[2];
   const expectedHex = parts[3];
@@ -167,8 +195,8 @@ async function verifyPasswordPbkdf2(secretInput: string, stored: string, pepper:
 
 /**
  * Verifica credenciales contra usuarios_app exigiendo contraseña en texto plano (sobre TLS)
- * hacia PBKDF2-210k en servidor y migrando transparentemente cuentas legacy (indiserv_v1$).
- * No acepta hashes cliente indiserv_v1$ directamente para impedir ataques pass-the-hash.
+ * hacia PBKDF2-210k en servidor, igualando el tiempo de cómputo ante cuentas inexistentes
+ * (anti timing-oracle) y evitando doble pasada PBKDF2 en cuentas modernas.
  */
 async function verifyUserCredentialsAndMigrate(
   // deno-lint-ignore no-explicit-any
@@ -191,29 +219,36 @@ async function verifyUserCredentialsAndMigrate(
     .eq("dni", cleanDni)
     .maybeSingle();
 
-  if (error || !user) return { ok: false };
-  if (String(user.correo || "").trim().toLowerCase() !== cleanCorreo) return { ok: false };
+  if (error || !user || String(user.correo || "").trim().toLowerCase() !== cleanCorreo) {
+    // Igualar latencia de CPU (210k iteraciones PBKDF2) para evitar enumeración por tiempo
+    await verifyPasswordPbkdf2(plainPassword, DUMMY_PBKDF2_HASH, pepper || "dummy_pepper");
+    return { ok: false };
+  }
 
   const stored = String(user.password_hash || "").trim();
   let matched = false;
   let needsUpgrade = false;
 
   if (stored.startsWith("indiserv_pbkdf2$")) {
+    // Una única pasada PBKDF2-210k (sin amplificación de CPU ante contraseña errónea)
     matched = await verifyPasswordPbkdf2(plainPassword, stored, pepper);
-    if (!matched) {
-      // Compatibilidad con cuentas migradas en lote desde indiserv_v1$ -> re-hash limpio sobre plainPassword
-      const legacyCompat = await computeLegacyV1Hash(cleanDni, plainPassword);
-      matched = await verifyPasswordPbkdf2(legacyCompat, stored, pepper);
-      if (matched) {
-        needsUpgrade = true;
-      }
+  } else if (stored.startsWith("indiserv_pbkdf2_v1$")) {
+    // Cuenta migrada en lote desde indiserv_v1$ -> validar legacy wrapped y actualizar a formato limpio
+    const legacyCompat = await computeLegacyV1Hash(cleanDni, plainPassword);
+    matched = await verifyPasswordPbkdf2(legacyCompat, stored, pepper);
+    if (matched) {
+      needsUpgrade = true;
     }
   } else if (stored.startsWith("indiserv_v1$")) {
     const candidateV1 = await computeLegacyV1Hash(cleanDni, plainPassword);
     if (timingSafeEqualStr(stored, candidateV1)) {
       matched = true;
       needsUpgrade = true;
+    } else {
+      await verifyPasswordPbkdf2(plainPassword, DUMMY_PBKDF2_HASH, pepper || "dummy_pepper");
     }
+  } else {
+    await verifyPasswordPbkdf2(plainPassword, DUMMY_PBKDF2_HASH, pepper || "dummy_pepper");
   }
 
   if (!matched) return { ok: false };
@@ -718,6 +753,12 @@ Deno.serve(async (req: Request) => {
           p_device_hash: deviceHash,
         });
       }
+      // Purga oportunista (~1 de cada 20 cierres de sesión) de registros vencidos en PostgreSQL
+      const rbuf = new Uint8Array(1);
+      crypto.getRandomValues(rbuf);
+      if (rbuf[0] < 13) {
+        admin.rpc("purgar_registros_expirados").catch(() => {});
+      }
       return json({ ok: true });
     }
 
@@ -857,7 +898,41 @@ Deno.serve(async (req: Request) => {
       if (error || !res?.ok) {
         return json({ ok: false, error: res?.error || "No se pudo guardar el ticket." }, 400);
       }
-      return json({ ok: true, id_ticket: res.id_ticket, share_token: res.share_token || null });
+      return json({
+        ok: true,
+        id_ticket: res.id_ticket,
+        share_token: res.share_token || null,
+        share_token_expira_en: res.share_token_expira_en || null,
+      });
+    }
+
+    if (action === "ticket_rotate_share_token") {
+      const sess = await requireActiveSession(admin, body);
+      if (!sess.ok) {
+        return json({ ok: false, session_expired: true, error: "Sesión expirada. Vuelva a iniciar sesión." }, 401);
+      }
+      const ticketId = String(body?.ticket_id || "").trim();
+      const ttlHours = Math.max(1, Math.min(168, Number(body?.ttl_hours || 72)));
+      if (!/^[A-Za-z0-9_-]{6,48}$/.test(ticketId)) {
+        return json({ ok: false, error: "ID de ticket inválido." }, 400);
+      }
+      const { data: res, error } = await admin.rpc("rotar_share_token_seguro", {
+        p_dni: sess.dni,
+        p_ticket_id: ticketId,
+        p_ttl_hours: ttlHours,
+      });
+      if (error || !res?.ok) {
+        return json(
+          { ok: false, forbidden: Boolean(res?.forbidden), error: res?.error || "No se pudo rotar el enlace." },
+          res?.forbidden ? 403 : 400
+        );
+      }
+      return json({
+        ok: true,
+        id_ticket: res.id_ticket,
+        share_token: res.share_token,
+        share_token_expira_en: res.share_token_expira_en || null,
+      });
     }
 
     if (action === "tickets_list") {
@@ -1006,7 +1081,7 @@ Deno.serve(async (req: Request) => {
       for (const row of legacyRows || []) {
         const oldHash = String(row.password_hash || "").trim();
         if (!oldHash.startsWith("indiserv_v1$")) continue;
-        const wrapped = await hashPasswordPbkdf2(oldHash, otpPepper);
+        const wrapped = await hashPasswordPbkdf2(oldHash, otpPepper, "indiserv_pbkdf2_v1");
         const { error: uErr } = await admin
           .from("usuarios_app")
           .update({ password_hash: wrapped })
@@ -1715,6 +1790,7 @@ Deno.serve(async (req: Request) => {
     // 9. PASSWORD RESET INIT (Desde Login: DNI + correo + anti-enumeración + OTP)
     // -------------------------------------------------------------------------
     if (action === "password_reset_init") {
+      const startedMs = performance.now();
       const dni = String(body?.dni || "").trim();
       const correo = String(body?.correo || "").trim().toLowerCase();
       const deviceHash = String(body?.device_hash || "").trim();
@@ -1735,6 +1811,7 @@ Deno.serve(async (req: Request) => {
 
       if (isHoney(dni, correo)) {
         await logHoneyAlert(admin, "CREDENCIAL_SENUELO_RESET_CLAVE", `DNI='${dni}' correo='${correo}'`, ip);
+        await ensureMinElapsedMs(startedMs, 340, 80);
         return json(neutralReply);
       }
 
@@ -1758,13 +1835,15 @@ Deno.serve(async (req: Request) => {
         .maybeSingle();
 
       if (!foundUser || String(foundUser.correo || "").trim().toLowerCase() !== correo) {
-        // Respuesta neutra anti-enumeración (forma idéntica al éxito)
+        // Respuesta neutra anti-enumeración con igualación temporal frente al envío Brevo
+        await ensureMinElapsedMs(startedMs, 340, 80);
         return json(neutralReply);
       }
 
       // Límite por DNI evaluado SOLO tras coincidir usuario+correo y respondido en forma neutra (cero oráculo)
       const lim = await checkDniOtpLimits(admin, dni);
       if (!lim.allowed) {
+        await ensureMinElapsedMs(startedMs, 340, 80);
         return json(neutralReply);
       }
 
@@ -1804,6 +1883,7 @@ Deno.serve(async (req: Request) => {
         return json({ ok: false, error: mail.error || "No se pudo enviar el correo de recuperación." }, 502);
       }
 
+      await ensureMinElapsedMs(startedMs, 340, 80);
       return json({
         ok: true,
         challenge_id: challengeId,

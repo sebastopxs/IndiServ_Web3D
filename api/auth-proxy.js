@@ -16,10 +16,40 @@ const SUPABASE_ANON_KEY =
   'sb_publishable_G7D4dhh3Q2LWzgRnzRRa9A_4ngZ5FiW';
 
 const COOKIE_NAME = '__Host-indiserv_sess';
+const PROXY_SECRET = String(process.env.VERCEL_PROXY_SECRET || '').trim();
 const VISITOR_WINDOW_MS = 60_000;
 const VISITOR_MAX_HITS = 30;
-// Guardia rápida en borde respaldada por rate_limits persistente en PostgreSQL (Supabase auth-otp)
+const RESET_WINDOW_MS = 3_600_000;
+const RESET_MAX_HITS = 6;
+const PUB_TKT_MAX_HITS = 15;
+const HONEY_MAX_HITS = 5;
+// Guardia rápida por visitante en borde respaldada por rate_limits persistente en PostgreSQL (Supabase auth-otp)
 const visitorHits = new Map();
+
+function getVisitorIp(req) {
+  const raw =
+    String(req.headers['x-vercel-forwarded-for'] || '').split(',')[0].trim() ||
+    String(req.headers['x-real-ip'] || '').trim() ||
+    'visitor';
+  return /^[0-9a-fA-F:.]{3,64}$/.test(raw) ? raw : 'visitor';
+}
+
+function consumeBucket(key, windowMs, maxHits) {
+  const now = Date.now();
+  const prev = (visitorHits.get(key) || []).filter((t) => now - t < windowMs);
+  if (prev.length >= maxHits) {
+    visitorHits.set(key, prev);
+    return false;
+  }
+  prev.push(now);
+  visitorHits.set(key, prev);
+  if (visitorHits.size > 1500) {
+    for (const [k, arr] of visitorHits.entries()) {
+      if (!arr.length || now - arr[arr.length - 1] >= RESET_WINDOW_MS) visitorHits.delete(k);
+    }
+  }
+  return true;
+}
 
 const ALLOWED_HOSTS = new Set(
   [
@@ -50,23 +80,18 @@ function buildSetCookie(value, maxAgeSec) {
   return `${COOKIE_NAME}=${encodeURIComponent(value)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${maxAgeSec}`;
 }
 
-function checkVisitorRateLimit(req) {
-  const ip =
-    String(req.headers['x-vercel-forwarded-for'] || '').split(',')[0].trim() ||
-    String(req.headers['x-real-ip'] || '').trim() ||
-    'visitor';
-  const now = Date.now();
-  const prev = (visitorHits.get(ip) || []).filter((t) => now - t < VISITOR_WINDOW_MS);
-  if (prev.length >= VISITOR_MAX_HITS) {
-    visitorHits.set(ip, prev);
+function checkVisitorRateLimit(ip, action) {
+  if (!consumeBucket(`all:${ip}`, VISITOR_WINDOW_MS, VISITOR_MAX_HITS)) {
     return false;
   }
-  prev.push(now);
-  visitorHits.set(ip, prev);
-  if (visitorHits.size > 1000) {
-    for (const [k, arr] of visitorHits.entries()) {
-      if (!arr.length || now - arr[arr.length - 1] >= VISITOR_WINDOW_MS) visitorHits.delete(k);
-    }
+  if (action === 'password_reset_init') {
+    return consumeBucket(`reset:${ip}`, RESET_WINDOW_MS, RESET_MAX_HITS);
+  }
+  if (action === 'ticket_get_public') {
+    return consumeBucket(`pub:${ip}`, VISITOR_WINDOW_MS, PUB_TKT_MAX_HITS);
+  }
+  if (action === 'honey_alert') {
+    return consumeBucket(`honey:${ip}`, VISITOR_WINDOW_MS, HONEY_MAX_HITS);
   }
   return true;
 }
@@ -96,11 +121,6 @@ export default async function handler(req, res) {
     return;
   }
 
-  if (!checkVisitorRateLimit(req)) {
-    res.status(429).json({ ok: false, error: 'Demasiadas solicitudes desde tu conexión. Espera 60 s.' });
-    return;
-  }
-
   let payload = req.body;
   if (typeof payload === 'string') {
     try {
@@ -115,9 +135,15 @@ export default async function handler(req, res) {
     return;
   }
 
+  const visitorIp = getVisitorIp(req);
+  const action = String(payload.action || '').trim();
+  if (!checkVisitorRateLimit(visitorIp, action)) {
+    res.status(429).json({ ok: false, error: 'Demasiadas solicitudes desde tu conexión. Espera 60 s.' });
+    return;
+  }
+
   const cookies = parseCookies(req.headers.cookie);
   const cookieToken = String(cookies[COOKIE_NAME] || '').trim();
-  const action = String(payload.action || '').trim();
 
   // Inyectar session_token desde la cookie HttpOnly si el cliente no envía uno explícito
   const outbound = { ...payload };
@@ -129,16 +155,22 @@ export default async function handler(req, res) {
 
   const targetFn = action === 'ai_audit' ? 'analizar-dispositivo-ia' : 'auth-otp';
   const upstreamUrl = `${SUPABASE_URL.replace(/\/$/, '')}/functions/v1/${targetFn}`;
+  const upstreamHeaders = {
+    'Content-Type': 'application/json',
+    apikey: SUPABASE_ANON_KEY,
+    Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+    Origin: origin,
+  };
+  // Reenviar la IP real verificada del visitante autenticado por secreto compartido Vercel <-> Supabase
+  if (PROXY_SECRET.length >= 16 && visitorIp !== 'visitor') {
+    upstreamHeaders['x-proxy-secret'] = PROXY_SECRET;
+    upstreamHeaders['x-indiserv-client-ip'] = visitorIp;
+  }
 
   try {
     const upstreamResp = await fetch(upstreamUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        apikey: SUPABASE_ANON_KEY,
-        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-        Origin: origin,
-      },
+      headers: upstreamHeaders,
       body: JSON.stringify(outbound),
     });
 

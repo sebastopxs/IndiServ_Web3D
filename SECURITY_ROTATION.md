@@ -19,8 +19,8 @@ Para renovar antes del vencimiento:
            c=x509.load_der_x509_certificate(d); p=base64.b64encode(hashlib.sha256(c.public_key().public_bytes(serialization.Encoding.DER,serialization.PublicFormat.SubjectPublicKeyInfo)).digest()).decode()
            print(h,i,c.subject.rfc4514_string(),c.not_valid_after_utc.date(),p)"
    ```
-2. Actualizar `<pin-set expiration="YYYY-MM-DD">` en `android/app/src/main/res/xml/network_security_config.xml` manteniendo al menos 1 pin de respaldo de raíz.
-3. Hacer `push` a `main` para publicar el nuevo `IndiServ_Analytica.apk` en GitHub Releases.
+2. Actualizar `<pin-set expiration="YYYY-MM-DD">` en `android/app/src/main/res/xml/network_security_config.xml` **y** `SUPABASE_SPKI_PINS` en `IndiServ_Python/core/cloud_gateway.py` manteniendo al menos 1 pin de respaldo de raíz.
+3. Hacer `push` a `main` en ambos repositorios para publicar los nuevos binarios Android y Desktop en GitHub Releases.
 
 ---
 
@@ -33,6 +33,7 @@ Ubicación: **Supabase Dashboard → Edge Functions → Secrets** (o `npx supaba
 | `BREVO_API_KEY` | Cada 180 días o ante incidente | Cero caída: crear nueva key en Brevo, actualizar secret, revocar la antigua. |
 | `GEMINI_API_KEY` | Cada 180 días o ante incidente | Cero caída: generar nueva key en Google AI Studio, actualizar secret, borrar la anterior. |
 | `ADMIN_DNIS` | Bajo demanda | Lista CSV de DNIs con permiso para consultar alertas Honeytoken. |
+| `VERCEL_PROXY_SECRET` | Cada 180 días | Secreto compartido (>= 32 chars) entre **Vercel Environment Variables** y **Supabase Secrets** para que `api/auth-proxy.js` autentique y reenvíe la IP real del visitante a `auth-otp`. Actualizar primero en Supabase o rotar en ventana corta y redeployar Vercel. |
 | `OTP_PEPPER` | Solo ante compromiso confirmado | ⚠️ `OTP_PEPPER` participa en los hashes PBKDF2 de `usuarios_app` y HMAC de `codigos_otp`. Si se rota por incidente, los usuarios deberán usar *"¿Olvidaste tu contraseña?"* (recuperación por correo Brevo) para re-generar su hash bajo el nuevo pepper. |
 
 ---

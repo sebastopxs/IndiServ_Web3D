@@ -15,9 +15,6 @@ const SUPABASE_ANON_KEY =
 const DEVICE_ID_STORAGE_KEY = '__indiserv_dev_id_v1';
 const SESSION_STORAGE_KEY = '__indiserv_session_v1';
 
-const HASH_PREFIX = 'indiserv_v1$';
-const HASH_SALT_NAMESPACE = 'INDISERV_SALT_2026';
-
 export const HONEY_DNIS = new Set(['00000000', '99999999', '12345678', '87654321', '11111111', 'admin', 'root']);
 export const HONEY_EMAILS = new Set([
   'admin@indiserv.pe',
@@ -85,28 +82,6 @@ export function generateSecureTicketId(dniOrPrefix, tag = 'MOB') {
   const clean = String(dniOrPrefix || '').trim();
   const pref = clean.length >= 4 ? clean.slice(0, 4) : 'MOB';
   return `${pref}-${tag}-${randomHex(8)}`;
-}
-
-export async function hashPassword(dni, password) {
-  const cleanDni = String(dni || '').trim();
-  const cleanPass = String(password || '');
-  if (cleanPass.startsWith(HASH_PREFIX)) return cleanPass;
-
-  const raw = `${HASH_SALT_NAMESPACE}::${cleanDni}::${cleanPass}`;
-  const enc = new TextEncoder().encode(raw);
-  const digest = await crypto.subtle.digest('SHA-256', enc);
-  const hex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
-  return `${HASH_PREFIX}${hex}`;
-}
-
-export async function verifyPassword(dni, plainPassword, storedHash) {
-  if (!storedHash || !plainPassword) return { valid: false, needsMigration: false };
-  const expected = await hashPassword(dni, plainPassword);
-  if (storedHash.startsWith(HASH_PREFIX)) {
-    return { valid: storedHash === expected, needsMigration: false };
-  }
-  const legacyValid = storedHash === plainPassword;
-  return { valid: legacyValid, needsMigration: legacyValid };
 }
 
 export function checkLoginRateLimit() {

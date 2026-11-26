@@ -31,7 +31,6 @@ import {
 import {
   callAuthOtp,
   getDeviceFingerprint,
-  hashPassword,
   loadSessionToken,
   saveSessionToken,
 } from '../utils/security';

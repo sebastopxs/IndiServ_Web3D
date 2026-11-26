@@ -6,6 +6,7 @@ package com.indiserv.analytica;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.view.View;
+import android.view.WindowManager;
 import android.webkit.WebView;
 
 import androidx.activity.OnBackPressedCallback;
@@ -25,6 +26,12 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(BiometricAuthPlugin.class);
         registerPlugin(SessionVaultPlugin.class);
         super.onCreate(savedInstanceState);
+
+        // Impedir capturas de pantalla y miniaturas en apps recientes (protege DNI, OTP y credenciales)
+        getWindow().setFlags(
+            WindowManager.LayoutParams.FLAG_SECURE,
+            WindowManager.LayoutParams.FLAG_SECURE
+        );
 
         // Edge-to-edge consistente en Android 10-16: evitamos doble empuje del teclado (adjustPan + IME)
         // controlando en un único punto las barras del sistema, muesca y teclado virtual.

@@ -60,31 +60,35 @@ jobs:
           fi
           npx cap sync android
 
-      - name: Compilar APK instalable (Release firmado con R8 si hay keystore, sino Debug)
+      - name: Compilar APK Release firmado con R8 (sin fallback Debug)
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ] || [ -z "$ANDROID_KEYSTORE_PASSWORD" ] || [ -z "$ANDROID_KEY_ALIAS" ] || [ -z "$ANDROID_KEY_PASSWORD" ]; then
+            echo "::error::Faltan secretos de firma Release (ANDROID_KEYSTORE_BASE64/PASSWORD/ALIAS). Se aborta para impedir publicar un APK Debug."
+            exit 1
+          fi
           cd android
           chmod +x gradlew
-          if [ -n "$ANDROID_KEYSTORE_BASE64" ] && [ -n "$ANDROID_KEYSTORE_PASSWORD" ] && [ -n "$ANDROID_KEY_ALIAS" ]; then
-            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > release.keystore
-            export ANDROID_KEYSTORE_PATH="$PWD/release.keystore"
-            ./gradlew assembleRelease
-            cp app/build/outputs/apk/release/app-release.apk ../IndiServ_Analytica.apk
-            rm -f release.keystore
-          else
-            ./gradlew assembleDebug
-            cp app/build/outputs/apk/debug/app-debug.apk ../IndiServ_Analytica.apk
-          fi
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > release.keystore
+          export ANDROID_KEYSTORE_PATH="$PWD/release.keystore"
+          ./gradlew assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk ../IndiServ_Analytica.apk
+          rm -f release.keystore
+          cd ..
+          sha256sum IndiServ_Analytica.apk > SHA256SUMS-Android.txt
+          cat SHA256SUMS-Android.txt
 
       - name: Subir APK como Artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: IndiServ_Analytica-Android
-          path: IndiServ_Analytica.apk
+          path: |
+            IndiServ_Analytica.apk
+            SHA256SUMS-Android.txt
           if-no-files-found: error
 
       - name: Publicar APK público en GitHub Releases
@@ -94,8 +98,10 @@ jobs:
           name: IndiServ Analytica — App Android (.apk)
           body: |
             Descarga directa de **IndiServ Analytica para Android** (Android 8.0+):
-            - **Archivo**: `IndiServ_Analytica.apk`
+            - **Archivo**: `IndiServ_Analytica.apk` (Release firmado con R8 y pinning TLS SPKI)
+            - **Integridad**: `SHA256SUMS-Android.txt`
             - **Instalación**: descarga el `.apk` en tu teléfono Android, ábrelo y permite **"Instalar apps desconocidas"** cuando Android lo solicite.
-            - **Incluye**: Login/Registro con Política de Privacidad UNMSM, Escáner de dispositivo Android + Micro-Stress CPU móvil, Buscador de tickets de PC/Laptop en Supabase y Gemelo Digital 3D táctil.
           make_latest: true
-          files: IndiServ_Analytica.apk
+          files: |
+            IndiServ_Analytica.apk
+            SHA256SUMS-Android.txt
