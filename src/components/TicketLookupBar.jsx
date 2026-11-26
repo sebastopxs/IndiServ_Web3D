@@ -467,18 +467,20 @@ export default function TicketLookupBar({ user, onSelectTicket, onRequestLogin }
             </p>
             {ownerDni && (
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleToggleHoneyAlerts}
-                  className={`text-[10px] font-semibold px-2.5 py-1 rounded-lg border flex items-center gap-1 ${
-                    showHoneyAlerts
-                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                      : 'bg-[#101521] text-amber-400/90 border-slate-700 hover:border-amber-500/40'
-                  }`}
-                >
-                  <ShieldAlert className="w-3 h-3" />
-                  {showHoneyAlerts ? 'Ver Mis Reportes' : '🍯 Alertas Honeytoken'}
-                </button>
+                {user?.rol === 'admin' && (
+                  <button
+                    type="button"
+                    onClick={handleToggleHoneyAlerts}
+                    className={`text-[10px] font-semibold px-2.5 py-1 rounded-lg border flex items-center gap-1 ${
+                      showHoneyAlerts
+                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                        : 'bg-[#101521] text-amber-400/90 border-slate-700 hover:border-amber-500/40'
+                    }`}
+                  >
+                    <ShieldAlert className="w-3 h-3" />
+                    {showHoneyAlerts ? 'Ver Mis Reportes' : '🍯 Alertas Honeytoken'}
+                  </button>
+                )}
                 <span className="text-[10px] text-slate-500 font-mono">
                   {processedTickets.length}/{recent.length}
                 </span>

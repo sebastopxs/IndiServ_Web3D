@@ -2,9 +2,12 @@
  * security.js — Criptografía WebCrypto, Rate-Limiting y Motor de Honeytokens (Web + Android APK)
  */
 
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { Device } from '@capacitor/device';
 import { supabase } from '../supabaseClient.js';
+
+const SessionVault = registerPlugin('SessionVault');
+let _nativeSessionCache = null;
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://pvrfnvrxaxulcxacdino.supabase.co';
 const SUPABASE_ANON_KEY =
@@ -276,19 +279,47 @@ export async function getDeviceFingerprint() {
   return { deviceHash, deviceLabel, plataforma };
 }
 
+function isNativeAndroidPlatform() {
+  try {
+    return Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
+  } catch {
+    return false;
+  }
+}
+
 function getSessionStorageBackend() {
   try {
-    if (Capacitor.isNativePlatform()) {
-      return typeof localStorage !== 'undefined' ? localStorage : null;
-    }
-    // En navegador Web usamos sessionStorage (muere al cerrar la pestaña) y limpiamos restos en localStorage
+    // Nunca persistir session_token en localStorage (ni en Web ni en Android APK)
     if (typeof localStorage !== 'undefined') {
       localStorage.removeItem(SESSION_STORAGE_KEY);
+    }
+    if (isNativeAndroidPlatform()) {
+      return null; // En Android APK se usa exclusivamente SessionVault (AndroidKeyStore AES-256-GCM)
     }
     return typeof sessionStorage !== 'undefined' ? sessionStorage : null;
   } catch {
     return typeof sessionStorage !== 'undefined' ? sessionStorage : null;
   }
+}
+
+export async function hydrateNativeSession() {
+  if (!isNativeAndroidPlatform()) {
+    return loadSessionToken();
+  }
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+    }
+    const res = await SessionVault.loadSession();
+    if (res?.ok && res?.token && res?.deviceHash) {
+      _nativeSessionCache = { token: String(res.token), deviceHash: String(res.deviceHash) };
+      return _nativeSessionCache;
+    }
+  } catch {
+    // Bóveda vacía o no disponible
+  }
+  _nativeSessionCache = null;
+  return null;
 }
 
 export function isVercelCookieMode() {
@@ -304,13 +335,26 @@ export function isVercelCookieMode() {
 
 export function saveSessionToken(token, deviceHash) {
   try {
+    const cleanTok = String(token || '').trim();
+    const cleanDev = String(deviceHash || '').trim();
+    if (!cleanTok || !cleanDev) return;
+
+    if (isNativeAndroidPlatform()) {
+      _nativeSessionCache = { token: cleanTok, deviceHash: cleanDev };
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(SESSION_STORAGE_KEY);
+      }
+      SessionVault.saveSession({ token: cleanTok, deviceHash: cleanDev }).catch(() => {});
+      return;
+    }
+
     const store = getSessionStorageBackend();
     if (!store) return;
     // En producción Web (Vercel), el token real vive en cookie HttpOnly inaccesible a JS
-    const storedTok = isVercelCookieMode() ? '__HTTPONLY_COOKIE__' : String(token);
+    const storedTok = isVercelCookieMode() ? '__HTTPONLY_COOKIE__' : cleanTok;
     store.setItem(
       SESSION_STORAGE_KEY,
-      JSON.stringify({ token: storedTok, deviceHash: String(deviceHash) })
+      JSON.stringify({ token: storedTok, deviceHash: cleanDev })
     );
   } catch {
     // Ignore storage errors
@@ -319,6 +363,9 @@ export function saveSessionToken(token, deviceHash) {
 
 export function loadSessionToken() {
   try {
+    if (isNativeAndroidPlatform()) {
+      return _nativeSessionCache;
+    }
     const store = getSessionStorageBackend();
     if (!store) return null;
     const raw = store.getItem(SESSION_STORAGE_KEY);
@@ -335,6 +382,10 @@ export function loadSessionToken() {
 
 export function clearSessionToken() {
   try {
+    _nativeSessionCache = null;
+    if (isNativeAndroidPlatform()) {
+      SessionVault.clearSession().catch(() => {});
+    }
     if (typeof sessionStorage !== 'undefined') {
       sessionStorage.removeItem(SESSION_STORAGE_KEY);
     }

@@ -23,6 +23,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(HardwareInfoPlugin.class);
         registerPlugin(MaintenancePlugin.class);
         registerPlugin(BiometricAuthPlugin.class);
+        registerPlugin(SessionVaultPlugin.class);
         super.onCreate(savedInstanceState);
 
         // Edge-to-edge consistente en Android 10-16: evitamos doble empuje del teclado (adjustPan + IME)

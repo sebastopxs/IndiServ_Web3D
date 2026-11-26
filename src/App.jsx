@@ -20,6 +20,7 @@ import {
   installBrowserConsoleHoneypot,
   isHoneyTicket,
   triggerHoneytokenAlert,
+  hydrateNativeSession,
   loadSessionToken,
   clearSessionToken,
   callAuthOtp,
@@ -230,35 +231,36 @@ export default function App() {
 
   const [authUser, setAuthUser] = useState(null);
   const [authNotice, setAuthNotice] = useState('');
-  const [restoringSession, setRestoringSession] = useState(() => Boolean(loadSessionToken()));
+  const [restoringSession, setRestoringSession] = useState(() => isNativeApp || Boolean(loadSessionToken()));
   const [guestUnlocked, setGuestUnlocked] = useState(!isNativeApp || Boolean(initialTicketParam));
 
   useEffect(() => {
     let active = true;
-    const saved = loadSessionToken();
-    if (!saved) {
-      setRestoringSession(false);
-      return undefined;
-    }
-    callAuthOtp({
-      action: 'session_validate',
-      session_token: saved.token,
-      device_hash: saved.deviceHash,
-    })
-      .then((res) => {
+    (async () => {
+      try {
+        const saved = await hydrateNativeSession();
+        if (!active) return;
+        if (!saved) {
+          setRestoringSession(false);
+          return;
+        }
+        const res = await callAuthOtp({
+          action: 'session_validate',
+          session_token: saved.token,
+          device_hash: saved.deviceHash,
+        });
         if (!active) return;
         if (res?.ok && res?.user) {
           setAuthUser(res.user);
         } else {
           clearSessionToken();
         }
-      })
-      .catch(() => {
+      } catch {
         if (active) clearSessionToken();
-      })
-      .finally(() => {
+      } finally {
         if (active) setRestoringSession(false);
-      });
+      }
+    })();
     return () => {
       active = false;
     };
@@ -406,9 +408,23 @@ export default function App() {
   useEffect(() => {
     installBrowserConsoleHoneypot();
     const params = new URLSearchParams(window.location.search);
+    const hashParams = new URLSearchParams(String(window.location.hash || '').replace(/^#/, ''));
     const ticketParam = params.get('ticket')?.trim() || '';
     const tipoParam = params.get('tipo')?.trim()?.toLowerCase() || '';
-    const stParam = params.get('st')?.trim() || '';
+    // Priorizar #st=... (hash fragment que nunca viaja al servidor en logs HTTP) con fallback a ?st=
+    const stParam = hashParams.get('st')?.trim() || params.get('st')?.trim() || '';
+
+    // Limpiar el token compartido de la barra de dirección inmediatamente tras leerlo en memoria
+    if (stParam && typeof window !== 'undefined' && window.history?.replaceState) {
+      try {
+        params.delete('st');
+        const cleanQuery = params.toString();
+        const cleanUrl = `${window.location.pathname}${cleanQuery ? `?${cleanQuery}` : ''}`;
+        window.history.replaceState(null, '', cleanUrl);
+      } catch {
+        // Ignorar en entornos restringidos
+      }
+    }
 
     const trapParams = ['admin', 'debug', 'dump', 'sql', 'config', 'env', 'backup'];
     const touchedTrap = trapParams.find((p) => params.has(p));

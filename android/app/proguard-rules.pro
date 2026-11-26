@@ -1,21 +1,10 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
-
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
-
-# Reglas R8/ProGuard para preservar plugins nativos Capacitor y anotaciones en Release
+# Reglas R8/ProGuard estrictas: ofusca clases y métodos internos preservando
+# únicamente el punto de entrada MainActivity y los endpoints Capacitor.
 -keepattributes *Annotation*
--keep @com.getcapacitor.annotation.CapacitorPlugin class * { *; }
--keep class com.indiserv.analytica.** { *; }
+-keep public class com.indiserv.analytica.MainActivity { *; }
+-keep @com.getcapacitor.annotation.CapacitorPlugin public class * {
+    public <init>();
+}
 -keepclassmembers class * extends com.getcapacitor.Plugin {
     @com.getcapacitor.PluginMethod <methods>;
 }

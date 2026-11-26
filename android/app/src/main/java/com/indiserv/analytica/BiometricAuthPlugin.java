@@ -23,83 +23,132 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import org.json.JSONObject;
 
 import java.nio.charset.StandardCharsets;
+import java.security.KeyPairGenerator;
 import java.security.KeyStore;
+import java.security.PrivateKey;
+import java.security.PublicKey;
+import java.security.SecureRandom;
+import java.security.spec.MGF1ParameterSpec;
+import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.crypto.Cipher;
-import javax.crypto.KeyGenerator;
-import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.OAEPParameterSpec;
+import javax.crypto.spec.PSource;
+import javax.crypto.spec.SecretKeySpec;
 
 /**
- * BiometricAuthPlugin — Autenticación biométrica fuerte (BIOMETRIC_STRONG) vinculada
- * a clave AES-256-GCM en AndroidKeyStore con setUserAuthenticationRequired(true) y
- * setInvalidatedByBiometricEnrollment(true).
+ * BiometricAuthPlugin — Autenticación biométrica fuerte (BIOMETRIC_STRONG) con
+ * BiometricPrompt.CryptoObject estricto por operación (AUTH_WINDOW = 0, sin ventana temporal).
  *
- * La clave del TEE/StrongBox solo se desbloquea durante una ventana de 15 s tras la
- * verificación biométrica real del hardware (permitiendo descifrar y rotar el token
- * atómico de un solo uso sin pedir la huella dos veces).
+ * Arquitectura criptográfica híbrida (RSA-2048 OAEP en AndroidKeyStore TEE + AES-256-GCM efímero):
+ *  - La clave PRIVADA RSA-2048 en AndroidKeyStore exige autenticación biométrica por operación
+ *    (setUserAuthenticationParameters(0, AUTH_BIOMETRIC_STRONG) / validity -1 en API < 30) y
+ *    se invalida automáticamente al registrar nuevas huellas en el teléfono.
+ *  - Descifrar (`authenticate`) requiere obligatoriamente desbloquear el Cipher RSA mediante
+ *    BiometricPrompt.CryptoObject firmado por el sensor de huella hardware.
+ *  - Rotar el token de un solo uso (`rotateToken`) cifra con la clave PÚBLICA RSA-2048 + un DEK
+ *    AES-256-GCM nuevo, permitiendo rotación atómica sin ventana desbloqueada ni segundo prompt.
  */
 @CapacitorPlugin(name = "BiometricAuth")
 public class BiometricAuthPlugin extends Plugin {
-    private static final String KEY_ALIAS = "indiserv_biometric_aes_strong_v3";
+    private static final String KEY_ALIAS = "indiserv_biometric_rsa_crypto_v4";
     private static final String KEYSTORE_PROVIDER = "AndroidKeyStore";
-    private static final String PREFS_NAME = "indiserv_biometric_vault_v3";
+    private static final String PREFS_NAME = "indiserv_biometric_vault_v4";
+    private static final String KEY_ENC_DEK = "enc_dek";
     private static final String KEY_ENC_PAYLOAD = "enc_payload";
     private static final String KEY_ENC_IV = "enc_iv";
     private static final String KEY_META_NICK = "meta_nickname";
     private static final String KEY_META_DNI_MASK = "meta_dni_mask";
-    private static final String TRANSFORMATION = "AES/GCM/NoPadding";
+
+    private static final String RSA_TRANSFORMATION = "RSA/ECB/OAEPWithSHA-256AndMGF1Padding";
+    private static final String AES_TRANSFORMATION = "AES/GCM/NoPadding";
     private static final int GCM_TAG_BITS = 128;
-    private static final int AUTH_WINDOW_SEC = 15;
+
+    private static OAEPParameterSpec getOaepSpec() {
+        // Estándar AndroidKeyStore: digest SHA-256 con MGF1-SHA1 para compatibilidad total Keymaster (API 24-36)
+        return new OAEPParameterSpec(
+            "SHA-256",
+            "MGF1",
+            MGF1ParameterSpec.SHA1,
+            PSource.PSpecified.DEFAULT
+        );
+    }
 
     private SharedPreferences getVaultPrefs() {
         return getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
     }
 
-    private SecretKey getOrCreateSecretKey() throws Exception {
+    private void ensureRsaKeyPair() throws Exception {
         KeyStore ks = KeyStore.getInstance(KEYSTORE_PROVIDER);
         ks.load(null);
         if (ks.containsAlias(KEY_ALIAS)) {
-            KeyStore.Entry entry = ks.getEntry(KEY_ALIAS, null);
-            if (entry instanceof KeyStore.SecretKeyEntry) {
-                return ((KeyStore.SecretKeyEntry) entry).getSecretKey();
-            }
+            return;
         }
-        KeyGenerator keyGen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE_PROVIDER);
+        KeyPairGenerator kpg = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_RSA, KEYSTORE_PROVIDER);
         KeyGenParameterSpec.Builder builder = new KeyGenParameterSpec.Builder(
             KEY_ALIAS,
             KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT
         )
-            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-            .setKeySize(256)
+            .setKeySize(2048)
+            .setDigests(KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA1)
+            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_RSA_OAEP)
             .setUserAuthenticationRequired(true)
             .setInvalidatedByBiometricEnrollment(true);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            builder.setUserAuthenticationParameters(
-                AUTH_WINDOW_SEC,
-                KeyProperties.AUTH_BIOMETRIC_STRONG
-            );
+            // 0 = estricto por operación (exige CryptoObject en cada descifrado, cero ventana temporal)
+            builder.setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG);
         } else {
-            // API 24-29: ventana corta de 15 s vinculada a autenticación biométrica del sistema
-            builder.setUserAuthenticationValidityDurationSeconds(AUTH_WINDOW_SEC);
+            // API 24-29: -1 exige CryptoObject por operación
+            builder.setUserAuthenticationValidityDurationSeconds(-1);
         }
 
-        keyGen.init(builder.build());
-        return keyGen.generateKey();
+        kpg.initialize(builder.build());
+        kpg.generateKeyPair();
+    }
+
+    private PublicKey getPublicKey() throws Exception {
+        ensureRsaKeyPair();
+        KeyStore ks = KeyStore.getInstance(KEYSTORE_PROVIDER);
+        ks.load(null);
+        java.security.cert.Certificate cert = ks.getCertificate(KEY_ALIAS);
+        if (cert == null) {
+            throw new IllegalStateException("Certificado AndroidKeyStore no encontrado.");
+        }
+        return cert.getPublicKey();
+    }
+
+    private PrivateKey getPrivateKey() throws Exception {
+        KeyStore ks = KeyStore.getInstance(KEYSTORE_PROVIDER);
+        ks.load(null);
+        KeyStore.Entry entry = ks.getEntry(KEY_ALIAS, null);
+        if (entry instanceof KeyStore.PrivateKeyEntry) {
+            return ((KeyStore.PrivateKeyEntry) entry).getPrivateKey();
+        }
+        throw new IllegalStateException("Clave privada biométrica no disponible.");
+    }
+
+    private Cipher initDecryptRsaCipher() throws Exception {
+        PrivateKey privKey = getPrivateKey();
+        Cipher rsaCipher = Cipher.getInstance(RSA_TRANSFORMATION);
+        rsaCipher.init(Cipher.DECRYPT_MODE, privKey, getOaepSpec());
+        return rsaCipher;
     }
 
     private void deleteKeyAndVault() {
         getVaultPrefs().edit().clear().apply();
         getContext().getSharedPreferences("indiserv_biometric_vault_v1", Context.MODE_PRIVATE).edit().clear().apply();
         getContext().getSharedPreferences("indiserv_biometric_vault_v2", Context.MODE_PRIVATE).edit().clear().apply();
+        getContext().getSharedPreferences("indiserv_biometric_vault_v3", Context.MODE_PRIVATE).edit().clear().apply();
         try {
             KeyStore ks = KeyStore.getInstance(KEYSTORE_PROVIDER);
             ks.load(null);
-            if (ks.containsAlias(KEY_ALIAS)) {
-                ks.deleteEntry(KEY_ALIAS);
+            for (String alias : new String[]{KEY_ALIAS, "indiserv_biometric_aes_strong_v3"}) {
+                if (ks.containsAlias(alias)) {
+                    ks.deleteEntry(alias);
+                }
             }
         } catch (Exception ignored) {
             // Silencioso
@@ -112,37 +161,57 @@ public class BiometricAuthPlugin extends Plugin {
         payload.put("biometric_token", biometricToken);
         payload.put("nickname", nickname);
 
-        SecretKey key = getOrCreateSecretKey();
-        Cipher cipher = Cipher.getInstance(TRANSFORMATION);
-        cipher.init(Cipher.ENCRYPT_MODE, key);
-        byte[] iv = cipher.getIV();
-        byte[] cipherBytes = cipher.doFinal(payload.toString().getBytes(StandardCharsets.UTF_8));
+        byte[] dek = new byte[32];
+        byte[] iv = new byte[12];
+        SecureRandom rng = new SecureRandom();
+        rng.nextBytes(dek);
+        rng.nextBytes(iv);
 
-        String dniMask = dni.length() >= 4 ? "••••" + dni.substring(dni.length() - 4) : dni;
-        getVaultPrefs()
-            .edit()
-            .putString(KEY_ENC_PAYLOAD, Base64.encodeToString(cipherBytes, Base64.NO_WRAP))
-            .putString(KEY_ENC_IV, Base64.encodeToString(iv, Base64.NO_WRAP))
-            .putString(KEY_META_NICK, nickname)
-            .putString(KEY_META_DNI_MASK, dniMask)
-            .apply();
+        try {
+            Cipher aesCipher = Cipher.getInstance(AES_TRANSFORMATION);
+            aesCipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(dek, "AES"), new GCMParameterSpec(GCM_TAG_BITS, iv));
+            byte[] cipherBytes = aesCipher.doFinal(payload.toString().getBytes(StandardCharsets.UTF_8));
+
+            PublicKey pubKey = getPublicKey();
+            Cipher rsaCipher = Cipher.getInstance(RSA_TRANSFORMATION);
+            rsaCipher.init(Cipher.ENCRYPT_MODE, pubKey, getOaepSpec());
+            byte[] wrappedDek = rsaCipher.doFinal(dek);
+
+            String dniMask = dni.length() >= 4 ? "••••" + dni.substring(dni.length() - 4) : dni;
+            getVaultPrefs()
+                .edit()
+                .putString(KEY_ENC_DEK, Base64.encodeToString(wrappedDek, Base64.NO_WRAP))
+                .putString(KEY_ENC_PAYLOAD, Base64.encodeToString(cipherBytes, Base64.NO_WRAP))
+                .putString(KEY_ENC_IV, Base64.encodeToString(iv, Base64.NO_WRAP))
+                .putString(KEY_META_NICK, nickname)
+                .putString(KEY_META_DNI_MASK, dniMask)
+                .apply();
+        } finally {
+            Arrays.fill(dek, (byte) 0);
+        }
     }
 
-    private JSONObject decryptStored() throws Exception {
+    private JSONObject decryptStoredWithUnlockedCipher(Cipher unlockedRsaCipher) throws Exception {
         SharedPreferences prefs = getVaultPrefs();
+        String b64Dek = prefs.getString(KEY_ENC_DEK, null);
         String b64Data = prefs.getString(KEY_ENC_PAYLOAD, null);
         String b64Iv = prefs.getString(KEY_ENC_IV, null);
-        if (b64Data == null || b64Iv == null) {
+        if (b64Dek == null || b64Data == null || b64Iv == null) {
             return null;
         }
+        byte[] wrappedDek = Base64.decode(b64Dek, Base64.NO_WRAP);
         byte[] cipherBytes = Base64.decode(b64Data, Base64.NO_WRAP);
         byte[] iv = Base64.decode(b64Iv, Base64.NO_WRAP);
 
-        SecretKey key = getOrCreateSecretKey();
-        Cipher cipher = Cipher.getInstance(TRANSFORMATION);
-        cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(GCM_TAG_BITS, iv));
-        byte[] plainBytes = cipher.doFinal(cipherBytes);
-        return new JSONObject(new String(plainBytes, StandardCharsets.UTF_8));
+        byte[] dek = unlockedRsaCipher.doFinal(wrappedDek);
+        try {
+            Cipher aesCipher = Cipher.getInstance(AES_TRANSFORMATION);
+            aesCipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(dek, "AES"), new GCMParameterSpec(GCM_TAG_BITS, iv));
+            byte[] plainBytes = aesCipher.doFinal(cipherBytes);
+            return new JSONObject(new String(plainBytes, StandardCharsets.UTF_8));
+        } finally {
+            Arrays.fill(dek, (byte) 0);
+        }
     }
 
     @PluginMethod
@@ -165,6 +234,7 @@ public class BiometricAuthPlugin extends Plugin {
 
         SharedPreferences prefs = getVaultPrefs();
         boolean hasSaved =
+            prefs.getString(KEY_ENC_DEK, null) != null &&
             prefs.getString(KEY_ENC_PAYLOAD, null) != null &&
             prefs.getString(KEY_ENC_IV, null) != null;
 
@@ -209,6 +279,27 @@ public class BiometricAuthPlugin extends Plugin {
             return;
         }
 
+        // Reiniciar par de claves limpio y validar el CryptoObject por operación antes de guardar
+        deleteKeyAndVault();
+        final Cipher probeCipher;
+        final byte[] probeWrapped;
+        final byte[] probeChallenge = new byte[32];
+        try {
+            ensureRsaKeyPair();
+            new SecureRandom().nextBytes(probeChallenge);
+            Cipher encProbe = Cipher.getInstance(RSA_TRANSFORMATION);
+            encProbe.init(Cipher.ENCRYPT_MODE, getPublicKey(), getOaepSpec());
+            probeWrapped = encProbe.doFinal(probeChallenge);
+            probeCipher = initDecryptRsaCipher();
+        } catch (Exception ex) {
+            deleteKeyAndVault();
+            JSObject err = new JSObject();
+            err.put("ok", false);
+            err.put("error", "No se pudo inicializar la bóveda AndroidKeyStore: " + ex.getMessage());
+            call.resolve(err);
+            return;
+        }
+
         AtomicBoolean settled = new AtomicBoolean(false);
         activity.runOnUiThread(() -> {
             BiometricPrompt prompt = new BiometricPrompt(
@@ -219,6 +310,14 @@ public class BiometricAuthPlugin extends Plugin {
                     public void onAuthenticationSucceeded(@NonNull BiometricPrompt.AuthenticationResult result) {
                         if (!settled.compareAndSet(false, true)) return;
                         try {
+                            BiometricPrompt.CryptoObject co = result.getCryptoObject();
+                            if (co == null || co.getCipher() == null) {
+                                throw new SecurityException("CryptoObject biométrico ausente.");
+                            }
+                            byte[] unwrapped = co.getCipher().doFinal(probeWrapped);
+                            if (!Arrays.equals(unwrapped, probeChallenge)) {
+                                throw new SecurityException("Verificación criptográfica del TEE fallida.");
+                            }
                             String safeNick = nickname.isEmpty() ? "Operador" : nickname;
                             encryptAndStore(dni, biometricToken, safeNick);
                             String dniMask = dni.length() >= 4 ? "••••" + dni.substring(dni.length() - 4) : dni;
@@ -245,6 +344,7 @@ public class BiometricAuthPlugin extends Plugin {
                     @Override
                     public void onAuthenticationError(int errorCode, @NonNull CharSequence errString) {
                         if (!settled.compareAndSet(false, true)) return;
+                        deleteKeyAndVault();
                         JSObject ret = new JSObject();
                         ret.put("ok", false);
                         ret.put("cancelled", true);
@@ -256,12 +356,12 @@ public class BiometricAuthPlugin extends Plugin {
 
             BiometricPrompt.PromptInfo info = new BiometricPrompt.PromptInfo.Builder()
                 .setTitle("Activar acceso con huella")
-                .setSubtitle("Confirma tu huella digital (hardware TEE/StrongBox)")
+                .setSubtitle("Confirma tu huella digital (CryptoObject TEE/StrongBox)")
                 .setNegativeButtonText("Cancelar")
                 .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
                 .build();
 
-            prompt.authenticate(info);
+            prompt.authenticate(info, new BiometricPrompt.CryptoObject(probeCipher));
         });
     }
 
@@ -277,6 +377,7 @@ public class BiometricAuthPlugin extends Plugin {
             return;
         }
         try {
+            // Re-cifra con la clave PÚBLICA RSA-2048 + nuevo DEK AES-256-GCM (la clave privada permanece bloqueada)
             encryptAndStore(dni, biometricToken, nickname.isEmpty() ? "Operador" : nickname);
             JSObject ret = new JSObject();
             ret.put("ok", true);
@@ -291,7 +392,11 @@ public class BiometricAuthPlugin extends Plugin {
     @PluginMethod
     public void authenticate(PluginCall call) {
         SharedPreferences prefs = getVaultPrefs();
-        if (prefs.getString(KEY_ENC_PAYLOAD, null) == null || prefs.getString(KEY_ENC_IV, null) == null) {
+        if (
+            prefs.getString(KEY_ENC_DEK, null) == null ||
+            prefs.getString(KEY_ENC_PAYLOAD, null) == null ||
+            prefs.getString(KEY_ENC_IV, null) == null
+        ) {
             JSObject ret = new JSObject();
             ret.put("ok", false);
             ret.put("error", "No hay una sesión biométrica guardada en este dispositivo.");
@@ -308,6 +413,27 @@ public class BiometricAuthPlugin extends Plugin {
             return;
         }
 
+        final Cipher rsaDecryptCipher;
+        try {
+            rsaDecryptCipher = initDecryptRsaCipher();
+        } catch (KeyPermanentlyInvalidatedException inv) {
+            deleteKeyAndVault();
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("invalidated", true);
+            ret.put("error", "Las huellas registradas cambiaron. Inicia sesión con contraseña para reactivarla.");
+            call.resolve(ret);
+            return;
+        } catch (Exception ex) {
+            deleteKeyAndVault();
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("invalidated", true);
+            ret.put("error", "La clave biométrica fue invalidada. Inicia sesión con contraseña para reactivarla.");
+            call.resolve(ret);
+            return;
+        }
+
         String nick = prefs.getString(KEY_META_NICK, "Operador");
         AtomicBoolean settled = new AtomicBoolean(false);
         activity.runOnUiThread(() -> {
@@ -319,7 +445,11 @@ public class BiometricAuthPlugin extends Plugin {
                     public void onAuthenticationSucceeded(@NonNull BiometricPrompt.AuthenticationResult result) {
                         if (!settled.compareAndSet(false, true)) return;
                         try {
-                            JSONObject data = decryptStored();
+                            BiometricPrompt.CryptoObject co = result.getCryptoObject();
+                            if (co == null || co.getCipher() == null) {
+                                throw new SecurityException("CryptoObject biométrico ausente.");
+                            }
+                            JSONObject data = decryptStoredWithUnlockedCipher(co.getCipher());
                             if (data == null || data.optString("biometric_token", "").isEmpty()) {
                                 deleteKeyAndVault();
                                 JSObject ret = new JSObject();
@@ -364,7 +494,7 @@ public class BiometricAuthPlugin extends Plugin {
                 .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
                 .build();
 
-            prompt.authenticate(info);
+            prompt.authenticate(info, new BiometricPrompt.CryptoObject(rsaDecryptCipher));
         });
     }
 

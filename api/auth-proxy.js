@@ -18,7 +18,17 @@ const SUPABASE_ANON_KEY =
 const COOKIE_NAME = '__Host-indiserv_sess';
 const VISITOR_WINDOW_MS = 60_000;
 const VISITOR_MAX_HITS = 30;
+// Guardia rápida en borde respaldada por rate_limits persistente en PostgreSQL (Supabase auth-otp)
 const visitorHits = new Map();
+
+const ALLOWED_HOSTS = new Set(
+  [
+    'indiserv-web3d.vercel.app',
+    String(process.env.VERCEL_URL || '').trim().toLowerCase(),
+    String(process.env.VERCEL_BRANCH_URL || '').trim().toLowerCase(),
+    String(process.env.VERCEL_PROJECT_PRODUCTION_URL || '').trim().toLowerCase(),
+  ].filter(Boolean)
+);
 
 function parseCookies(cookieHeader) {
   const map = {};
@@ -69,12 +79,12 @@ export default async function handler(req, res) {
     return;
   }
 
-  const origin = String(req.headers.origin || '').trim();
-  const host = String(req.headers.host || '').trim();
+  const origin = String(req.headers.origin || '').trim().toLowerCase();
+  const host = String(req.headers.host || '').trim().toLowerCase();
   const fetchSite = String(req.headers['sec-fetch-site'] || '').trim().toLowerCase();
 
-  // Validación estricta same-origin HTTPS (anti-CSRF en profundidad junto a SameSite=Strict)
-  if (!host || !origin || origin !== `https://${host}`) {
+  // Validación estricta de Host en lista blanca + Origin HTTPS exacto (anti-CSRF / anti-Host-injection)
+  if (!host || !ALLOWED_HOSTS.has(host) || !origin || origin !== `https://${host}`) {
     res.status(403).json({ ok: false, error: 'Origen HTTPS no autorizado.' });
     return;
   }
