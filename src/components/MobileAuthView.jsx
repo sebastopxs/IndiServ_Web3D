@@ -649,8 +649,9 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo, initialNo
     const mm = String(Math.floor(otpChallenge.expLeft / 60)).padStart(2, '0');
     const ss = String(otpChallenge.expLeft % 60).padStart(2, '0');
     return (
-      <div className="h-full w-full bg-[#090c12] text-slate-100 overflow-y-auto px-4 py-5 flex flex-col items-center">
-        <div className="view-enter my-auto shrink-0 w-full max-w-md instrument-card rounded-2xl shadow-2xl overflow-hidden">
+      <div className="h-full w-full bg-[#090c12] text-slate-100 overflow-y-auto px-4 py-5">
+        <div className="min-h-full w-full flex items-center justify-center">
+          <div className="view-enter w-full max-w-md instrument-card rounded-2xl shadow-2xl overflow-hidden">
           <div className="bg-[#101521] p-5 border-b border-slate-800/80">
             <div className="flex items-center gap-2 mb-2">
               <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center">
@@ -780,13 +781,15 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo, initialNo
             </div>
           </form>
         </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="h-full w-full bg-[#090c12] text-slate-100 overflow-y-auto px-4 py-5 flex flex-col items-center">
-      <div className="view-enter my-auto shrink-0 w-full max-w-md instrument-card rounded-2xl shadow-2xl overflow-hidden">
+    <div className="h-full w-full bg-[#090c12] text-slate-100 overflow-y-auto px-4 py-5">
+      <div className="min-h-full w-full flex items-center justify-center">
+        <div className="view-enter w-full max-w-md instrument-card rounded-2xl shadow-2xl overflow-hidden">
 
         <div className="bg-[#101521] p-5 border-b border-slate-800/80">
           <div className="flex items-center justify-between mb-2">
@@ -1014,6 +1017,7 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo, initialNo
             </button>
           )}
         </form>
+        </div>
       </div>
 
       {showPolicyModal && (

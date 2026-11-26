@@ -46,10 +46,13 @@ public class MainActivity extends BridgeActivity {
                     WindowInsetsCompat.Type.systemBars()
                     | WindowInsetsCompat.Type.displayCutout()
                 );
-                Insets ime = windowInsets.getInsets(WindowInsetsCompat.Type.ime());
-                int bottomInset = Math.max(sys.bottom, ime.bottom);
-                view.setPadding(sys.left, sys.top, sys.right, bottomInset);
-                return WindowInsetsCompat.CONSUMED;
+                // Aplicamos solo systemBars + displayCutout en el contenedor nativo;
+                // el teclado (IME) lo gestiona adjustResize / WebView sin doble padding negro.
+                view.setPadding(sys.left, sys.top, sys.right, sys.bottom);
+                return new WindowInsetsCompat.Builder(windowInsets)
+                    .setInsets(WindowInsetsCompat.Type.systemBars(), Insets.NONE)
+                    .setInsets(WindowInsetsCompat.Type.displayCutout(), Insets.NONE)
+                    .build();
             });
             ViewCompat.requestApplyInsets(content);
         }
