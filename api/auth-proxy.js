@@ -3,7 +3,7 @@
  *
  * Mantiene el session_token exclusivamente en una cookie HttpOnly + Secure + SameSite=Strict
  * (__Host-indiserv_sess) inaccesible para JavaScript/XSS en el navegador web.
- * Inyecta session_token del lado servidor al llamar a Supabase Edge Functions (auth-otp y analizar-dispositivo-ia).
+ * Aplica Cache-Control: no-store, validación exacta de Origin HTTPS y rate-limit por visitante.
  */
 
 const SUPABASE_URL =
@@ -16,6 +16,9 @@ const SUPABASE_ANON_KEY =
   'sb_publishable_G7D4dhh3Q2LWzgRnzRRa9A_4ngZ5FiW';
 
 const COOKIE_NAME = '__Host-indiserv_sess';
+const VISITOR_WINDOW_MS = 60_000;
+const VISITOR_MAX_HITS = 30;
+const visitorHits = new Map();
 
 function parseCookies(cookieHeader) {
   const map = {};
@@ -34,7 +37,33 @@ function buildSetCookie(value, maxAgeSec) {
   return `${COOKIE_NAME}=${encodeURIComponent(value)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${maxAgeSec}`;
 }
 
+function checkVisitorRateLimit(req) {
+  const ip =
+    String(req.headers['x-vercel-forwarded-for'] || '').split(',')[0].trim() ||
+    String(req.headers['x-real-ip'] || '').trim() ||
+    'visitor';
+  const now = Date.now();
+  const prev = (visitorHits.get(ip) || []).filter((t) => now - t < VISITOR_WINDOW_MS);
+  if (prev.length >= VISITOR_MAX_HITS) {
+    visitorHits.set(ip, prev);
+    return false;
+  }
+  prev.push(now);
+  visitorHits.set(ip, prev);
+  if (visitorHits.size > 1000) {
+    for (const [k, arr] of visitorHits.entries()) {
+      if (!arr.length || now - arr[arr.length - 1] >= VISITOR_WINDOW_MS) visitorHits.delete(k);
+    }
+  }
+  return true;
+}
+
 export default async function handler(req, res) {
+  // Nunca cachear respuestas autenticadas ni tokens en navegador o proxies
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Vary', 'Origin, Cookie');
+
   if (req.method !== 'POST') {
     res.status(405).json({ ok: false, error: 'Método no permitido.' });
     return;
@@ -42,8 +71,20 @@ export default async function handler(req, res) {
 
   const origin = String(req.headers.origin || '').trim();
   const host = String(req.headers.host || '').trim();
-  if (origin && host && !origin.endsWith(`://${host}`)) {
-    res.status(403).json({ ok: false, error: 'Origen no autorizado.' });
+  const fetchSite = String(req.headers['sec-fetch-site'] || '').trim().toLowerCase();
+
+  // Validación estricta same-origin HTTPS (anti-CSRF en profundidad junto a SameSite=Strict)
+  if (!host || !origin || origin !== `https://${host}`) {
+    res.status(403).json({ ok: false, error: 'Origen HTTPS no autorizado.' });
+    return;
+  }
+  if (fetchSite && fetchSite !== 'same-origin') {
+    res.status(403).json({ ok: false, error: 'Solicitud cross-site bloqueada.' });
+    return;
+  }
+
+  if (!checkVisitorRateLimit(req)) {
+    res.status(429).json({ ok: false, error: 'Demasiadas solicitudes desde tu conexión. Espera 60 s.' });
     return;
   }
 
@@ -83,7 +124,7 @@ export default async function handler(req, res) {
         'Content-Type': 'application/json',
         apikey: SUPABASE_ANON_KEY,
         Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-        Origin: origin || `https://${host || 'indiserv-web3d.vercel.app'}`,
+        Origin: origin,
       },
       body: JSON.stringify(outbound),
     });
