@@ -69,8 +69,8 @@ REVOKE ALL ON TABLE public.codigos_otp FROM anon, authenticated;
 REVOKE ALL ON TABLE public.sesiones_activas FROM anon, authenticated;
 
 -- 5. CERRAR BYPASS DIRECTO POR POSTGREST SOBRE REGISTRO Y LOGIN SIN OTP
-REVOKE EXECUTE ON FUNCTION public.autenticar_usuario(text, text, text) FROM anon, authenticated;
-REVOKE EXECUTE ON FUNCTION public.registrar_usuario_seguro(text, text, text, text) FROM anon, authenticated;
+REVOKE ALL ON FUNCTION public.autenticar_usuario(text, text, text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.registrar_usuario_seguro(text, text, text, text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.autenticar_usuario(text, text, text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.registrar_usuario_seguro(text, text, text, text) TO service_role;
 
