@@ -291,13 +291,26 @@ function getSessionStorageBackend() {
   }
 }
 
+export function isVercelCookieMode() {
+  try {
+    if (Capacitor.isNativePlatform()) return false;
+    if (typeof window === 'undefined') return false;
+    const h = String(window.location?.hostname || '').toLowerCase();
+    return window.location?.protocol === 'https:' && h.endsWith('.vercel.app');
+  } catch {
+    return false;
+  }
+}
+
 export function saveSessionToken(token, deviceHash) {
   try {
     const store = getSessionStorageBackend();
     if (!store) return;
+    // En producción Web (Vercel), el token real vive en cookie HttpOnly inaccesible a JS
+    const storedTok = isVercelCookieMode() ? '__HTTPONLY_COOKIE__' : String(token);
     store.setItem(
       SESSION_STORAGE_KEY,
-      JSON.stringify({ token: String(token), deviceHash: String(deviceHash) })
+      JSON.stringify({ token: storedTok, deviceHash: String(deviceHash) })
     );
   } catch {
     // Ignore storage errors
@@ -334,15 +347,20 @@ export function clearSessionToken() {
 }
 
 export async function callAuthOtp(payload) {
-  const url = `${SUPABASE_URL.replace(/\/$/, '')}/functions/v1/auth-otp`;
-  try {
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: {
+  const useProxy = isVercelCookieMode();
+  const url = useProxy ? '/api/auth-proxy' : `${SUPABASE_URL.replace(/\/$/, '')}/functions/v1/auth-otp`;
+  const headers = useProxy
+    ? { 'Content-Type': 'application/json' }
+    : {
         'Content-Type': 'application/json',
         apikey: SUPABASE_ANON_KEY,
         Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-      },
+      };
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      credentials: useProxy ? 'same-origin' : 'omit',
+      headers,
       body: JSON.stringify(payload),
     });
     const parsed = await resp.json().catch(() => ({ ok: false, error: `HTTP ${resp.status}` }));
@@ -357,4 +375,28 @@ export async function callAuthOtp(payload) {
       error_conexion: `Error de conexión: ${err?.message || 'Verifique internet'}`,
     };
   }
+}
+
+export async function callAiAudit(telemetry) {
+  const saved = loadSessionToken();
+  if (!saved) return { error: 'unauthenticated', data: null };
+  if (isVercelCookieMode()) {
+    const res = await callAuthOtp({
+      action: 'ai_audit',
+      telemetry,
+      device_hash: saved.deviceHash,
+    });
+    if (res && !res.error && !res.error_conexion && res.nombre_comercial) {
+      return { data: res, error: null };
+    }
+    return { data: null, error: res?.error || res?.error_conexion || 'ai_failed' };
+  }
+  const { data, error } = await supabase.functions.invoke('analizar-dispositivo-ia', {
+    body: {
+      telemetry,
+      session_token: saved.token,
+      device_hash: saved.deviceHash,
+    },
+  });
+  return { data, error };
 }

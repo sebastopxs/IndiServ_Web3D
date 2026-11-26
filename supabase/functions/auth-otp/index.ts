@@ -823,7 +823,7 @@ Deno.serve(async (req: Request) => {
       if (error || !res?.ok) {
         return json({ ok: false, error: res?.error || "No se pudo guardar el ticket." }, 400);
       }
-      return json({ ok: true, id_ticket: res.id_ticket });
+      return json({ ok: true, id_ticket: res.id_ticket, share_token: res.share_token || null });
     }
 
     if (action === "tickets_list") {
@@ -852,14 +852,27 @@ Deno.serve(async (req: Request) => {
         return json({ ok: false, error: `Demasiadas consultas. Espera ${rlPub.wait_sec || 60} s.` }, 429);
       }
       const ticketId = String(body?.ticket_id || "").trim();
+      const shareToken = String(body?.share_token || "").trim();
       if (!/^[A-Za-z0-9_-]{6,48}$/.test(ticketId)) {
         return json({ ok: false, error: "ID de ticket inválido." }, 400);
       }
+      if (shareToken && !/^[a-fA-F0-9]{16,64}$/.test(shareToken)) {
+        return json({ ok: false, error: "Token de enlace inválido." }, 400);
+      }
+
+      let viewerDni: string | null = null;
+      if (body?.session_token && body?.device_hash) {
+        const sess = await requireActiveSession(admin, body);
+        if (sess.ok) viewerDni = sess.dni;
+      }
+
       const { data: res, error } = await admin.rpc("consultar_ticket_publico", {
         p_ticket_id: ticketId,
+        p_share_token: shareToken || null,
+        p_viewer_dni: viewerDni,
       });
       if (error || !res?.ok) {
-        return json({ ok: false, error: res?.error || "Ticket no encontrado." }, 404);
+        return json({ ok: false, error: res?.error || "Ticket no encontrado o no autorizado." }, 403);
       }
       return json({ ok: true, ticket: res.ticket });
     }

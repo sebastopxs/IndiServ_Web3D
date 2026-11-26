@@ -349,8 +349,9 @@ export default function App() {
 
   const profile = useMemo(() => mapTelemetryTo3DProfile(telemetry), [telemetry]);
 
-  const loadTicketById = useCallback(async (ticketIdRaw, tipoParam = '') => {
+  const loadTicketById = useCallback(async (ticketIdRaw, tipoParam = '', shareTokenRaw = '') => {
     const ticketParam = (ticketIdRaw || '').trim();
+    const stParam = (shareTokenRaw || '').trim();
     setLoading(true);
     setSelectedComponent(null);
 
@@ -368,15 +369,22 @@ export default function App() {
     }
 
     try {
-      let res = await callAuthOtp({ action: 'ticket_get_public', ticket_id: ticketParam });
+      const saved = loadSessionToken();
+      const reqBody = {
+        action: 'ticket_get_public',
+        ticket_id: ticketParam,
+        ...(stParam ? { share_token: stParam } : {}),
+        ...(saved ? { session_token: saved.token, device_hash: saved.deviceHash } : {}),
+      };
+      let res = await callAuthOtp(reqBody);
       if (!res?.ok && ticketParam) {
         await new Promise((r) => setTimeout(r, 1200));
-        res = await callAuthOtp({ action: 'ticket_get_public', ticket_id: ticketParam });
+        res = await callAuthOtp(reqBody);
       }
       const data = res?.ok ? res.ticket : null;
 
       if (!data) {
-        setStatusMessage(`[${res?.error_conexion ? 'Error al consultar ticket' : 'Ticket no encontrado'}]`);
+        setStatusMessage(`[${res?.error || (res?.error_conexion ? 'Error al consultar ticket' : 'Ticket no encontrado')}]`);
         setTelemetry({ ...FALLBACK, id_ticket: ticketParam, ticket_id: ticketParam });
         setIsLive(false);
         return;
@@ -400,6 +408,7 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const ticketParam = params.get('ticket')?.trim() || '';
     const tipoParam = params.get('tipo')?.trim()?.toLowerCase() || '';
+    const stParam = params.get('st')?.trim() || '';
 
     const trapParams = ['admin', 'debug', 'dump', 'sql', 'config', 'env', 'backup'];
     const touchedTrap = trapParams.find((p) => params.has(p));
@@ -416,12 +425,12 @@ export default function App() {
       );
     }
 
-    loadTicketById(ticketParam, tipoParam);
+    loadTicketById(ticketParam, tipoParam, stParam);
   }, [loadTicketById]);
 
-  const handleSelectTicketFromMobile = useCallback(async (idTicket) => {
+  const handleSelectTicketFromMobile = useCallback(async (idTicket, shareToken = '') => {
     navigateToTab('3d');
-    await loadTicketById(idTicket);
+    await loadTicketById(idTicket, '', shareToken);
   }, [loadTicketById, navigateToTab]);
 
   const handleOpenPhone3D = useCallback(({

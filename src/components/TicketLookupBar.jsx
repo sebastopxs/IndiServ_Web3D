@@ -251,7 +251,7 @@ export default function TicketLookupBar({ user, onSelectTicket, onRequestLogin }
     return (
       <button
         key={item.id_ticket}
-        onClick={() => onSelectTicket(item.id_ticket)}
+        onClick={() => onSelectTicket(item.id_ticket, item.share_token || '')}
         className="w-full text-left instrument-card hover:bg-[#192235] hover:border-cyan-500/40 rounded-xl p-3.5 flex items-center justify-between gap-3"
       >
         <div className="flex items-start gap-3 min-w-0 flex-1">
