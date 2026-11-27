@@ -3,11 +3,15 @@ package com.indiserv.analytica;
 /**
  * MainActivity — Actividad principal de Capacitor con registro de plugins nativos y manejo de retroceso Android.
  */
+import android.content.Intent;
 import android.graphics.Color;
+import android.net.Uri;
 import android.os.Bundle;
 import android.view.View;
 import android.view.WindowManager;
 import android.webkit.WebView;
+
+import org.json.JSONObject;
 
 import androidx.activity.OnBackPressedCallback;
 import androidx.core.graphics.Insets;
@@ -26,6 +30,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(BiometricAuthPlugin.class);
         registerPlugin(SessionVaultPlugin.class);
         super.onCreate(savedInstanceState);
+        handleIncomingOAuthIntent(getIntent());
 
         // Impedir capturas de pantalla y miniaturas en apps recientes (protege DNI, OTP y credenciales)
         getWindow().setFlags(
@@ -88,5 +93,35 @@ public class MainActivity extends BridgeActivity {
                 );
             }
         });
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleIncomingOAuthIntent(intent);
+    }
+
+    private void handleIncomingOAuthIntent(Intent intent) {
+        if (intent == null) {
+            return;
+        }
+        Uri uri = intent.getData();
+        if (uri == null) {
+            return;
+        }
+        String full = uri.toString();
+        if (!full.startsWith("com.indiserv.analytica://auth-callback")) {
+            return;
+        }
+        SessionVaultPlugin.setPendingOAuthUrl(full);
+        WebView webView = getBridge() != null ? getBridge().getWebView() : null;
+        if (webView != null) {
+            String jsArg = JSONObject.quote(full);
+            webView.post(() -> webView.evaluateJavascript(
+                "(function(){ if (window.__indiservDispatchOAuthUrl) { window.__indiservDispatchOAuthUrl(" + jsArg + "); } })()",
+                null
+            ));
+        }
     }
 }

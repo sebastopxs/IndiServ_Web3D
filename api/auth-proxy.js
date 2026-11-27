@@ -153,16 +153,35 @@ export default async function handler(req, res) {
     delete outbound.session_token;
   }
 
-  const targetFn = action === 'ai_audit' ? 'analizar-dispositivo-ia' : 'auth-otp';
-  const upstreamUrl = `${SUPABASE_URL.replace(/\/$/, '')}/functions/v1/${targetFn}`;
+  const baseSupabase = SUPABASE_URL.replace(/\/$/, '');
+  let upstreamUrl = `${baseSupabase}/functions/v1/${action === 'ai_audit' ? 'analizar-dispositivo-ia' : 'auth-otp'}`;
+  let upstreamBody = outbound;
   const upstreamHeaders = {
     'Content-Type': 'application/json',
     apikey: SUPABASE_ANON_KEY,
     Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
     Origin: origin,
   };
-  // Reenviar la IP real verificada del visitante autenticado por secreto compartido Vercel <-> Supabase
-  if (PROXY_SECRET.length >= 16 && visitorIp !== 'visitor') {
+
+  if (action === 'oauth_check_dni') {
+    upstreamUrl = `${baseSupabase}/rest/v1/rpc/verificar_dni_pre_oauth`;
+    upstreamBody = { p_dni: String(outbound.dni || '').trim() };
+  } else if (action === 'oauth_sync') {
+    const oauthTok = String(outbound.oauth_access_token || '').trim();
+    if (!oauthTok) {
+      res.status(400).json({ ok: false, error: 'Token OAuth requerido.' });
+      return;
+    }
+    upstreamUrl = `${baseSupabase}/rest/v1/rpc/oauth_sync_operador`;
+    upstreamHeaders.Authorization = `Bearer ${oauthTok}`;
+    upstreamBody = {
+      p_dni: outbound.p_dni ? String(outbound.p_dni).trim() : null,
+      p_nickname: outbound.p_nickname ? String(outbound.p_nickname).trim() : null,
+      p_device_hash: outbound.p_device_hash ? String(outbound.p_device_hash).trim() : null,
+      p_device_label: outbound.p_device_label ? String(outbound.p_device_label).trim() : null,
+    };
+  } else if (PROXY_SECRET.length >= 16 && visitorIp !== 'visitor') {
+    // Reenviar la IP real verificada del visitante autenticado por secreto compartido Vercel <-> Supabase
     upstreamHeaders['x-proxy-secret'] = PROXY_SECRET;
     upstreamHeaders['x-indiserv-client-ip'] = visitorIp;
   }
@@ -171,7 +190,7 @@ export default async function handler(req, res) {
     const upstreamResp = await fetch(upstreamUrl, {
       method: 'POST',
       headers: upstreamHeaders,
-      body: JSON.stringify(outbound),
+      body: JSON.stringify(upstreamBody),
     });
 
     const data = await upstreamResp.json().catch(() => ({ ok: false, error: `HTTP ${upstreamResp.status}` }));

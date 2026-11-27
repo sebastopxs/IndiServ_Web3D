@@ -24,6 +24,8 @@ import {
   loadSessionToken,
   clearSessionToken,
   callAuthOtp,
+  completeSocialOAuthCallback,
+  consumeAndroidPendingOAuthUrl,
 } from './utils/security';
 import {
   RotateCcw, Maximize2, Minimize2, EyeOff, Eye, FileDown, Laptop, Monitor,
@@ -229,15 +231,66 @@ export default function App() {
     []
   );
 
+  const hasWebOAuthCallback = useMemo(() => {
+    try {
+      const qs = new URLSearchParams(window.location.search);
+      return Boolean(qs.get('code') || qs.get('error') || window.location.hash.includes('access_token='));
+    } catch {
+      return false;
+    }
+  }, []);
+
   const [authUser, setAuthUser] = useState(null);
   const [authNotice, setAuthNotice] = useState('');
-  const [restoringSession, setRestoringSession] = useState(() => isNativeApp || Boolean(loadSessionToken()));
-  const [guestUnlocked, setGuestUnlocked] = useState(!isNativeApp || Boolean(initialTicketParam));
+  const [restoringSession, setRestoringSession] = useState(
+    () => isNativeApp || hasWebOAuthCallback || Boolean(loadSessionToken())
+  );
+  const [guestUnlocked, setGuestUnlocked] = useState(
+    (!isNativeApp && !hasWebOAuthCallback) || Boolean(initialTicketParam)
+  );
 
   useEffect(() => {
     let active = true;
+
+    const processOAuthUrl = async (urlStr) => {
+      const out = await completeSocialOAuthCallback(urlStr);
+      if (!active || !out) return false;
+      if (out.ok && out.authenticated && out.user) {
+        setAuthUser(out.user);
+        setAuthNotice('');
+        setRestoringSession(false);
+        return true;
+      }
+      if (!out.ok && out.error) {
+        setGuestUnlocked(false);
+        setAuthNotice(out.error);
+      }
+      return false;
+    };
+
+    window.__indiservDispatchOAuthUrl = (incomingUrl) => {
+      processOAuthUrl(incomingUrl);
+    };
+
     (async () => {
       try {
+        if (hasWebOAuthCallback) {
+          const handledWeb = await processOAuthUrl(window.location.href);
+          if (handledWeb || !active) {
+            if (active) setRestoringSession(false);
+            return;
+          }
+        }
+
+        const pendingNativeUrl = await consumeAndroidPendingOAuthUrl();
+        if (pendingNativeUrl) {
+          const handledNat = await processOAuthUrl(pendingNativeUrl);
+          if (handledNat || !active) {
+            if (active) setRestoringSession(false);
+            return;
+          }
+        }
+
         const saved = await hydrateNativeSession();
         if (!active) return;
         if (!saved) {
@@ -263,8 +316,9 @@ export default function App() {
     })();
     return () => {
       active = false;
+      delete window.__indiservDispatchOAuthUrl;
     };
-  }, []);
+  }, [hasWebOAuthCallback]);
 
   const handleLogout = useCallback(() => {
     const saved = loadSessionToken();

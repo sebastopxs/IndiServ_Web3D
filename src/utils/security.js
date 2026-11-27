@@ -441,3 +441,332 @@ export async function callAiAudit(telemetry) {
   });
   return { data, error };
 }
+
+const OAUTH_PKCE_STORAGE_KEY = '__indiserv_oauth_pkce_v1';
+export const ANDROID_OAUTH_REDIRECT_URI = 'com.indiserv.analytica://auth-callback';
+
+function base64UrlEncodeBytes(bytes) {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+async function generatePkcePair() {
+  const raw = new Uint8Array(36);
+  crypto.getRandomValues(raw);
+  const verifier = base64UrlEncodeBytes(raw);
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+  const challenge = base64UrlEncodeBytes(new Uint8Array(digest));
+  return { verifier, challenge };
+}
+
+export function savePendingOAuthState(data) {
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.setItem(OAUTH_PKCE_STORAGE_KEY, JSON.stringify({ ...data, ts: Date.now() }));
+    }
+  } catch {
+    // Ignore
+  }
+}
+
+export function loadPendingOAuthState() {
+  try {
+    if (typeof sessionStorage === 'undefined') return null;
+    const raw = sessionStorage.getItem(OAUTH_PKCE_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed?.ts && Date.now() - parsed.ts > 600_000) {
+      sessionStorage.removeItem(OAUTH_PKCE_STORAGE_KEY);
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function cancelPendingSocialOAuth() {
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.removeItem(OAUTH_PKCE_STORAGE_KEY);
+    }
+  } catch {
+    // Ignore
+  }
+}
+
+export async function verifyDniPreOAuth(dni) {
+  const cleanDni = String(dni || '').trim();
+  if (!/^\d{8}$/.test(cleanDni)) {
+    return {
+      ok: false,
+      existe: false,
+      error: 'Ingrese primero su DNI de 8 dígitos numéricos antes de continuar con Google o GitHub.',
+    };
+  }
+  if (isHoneyCredential(cleanDni, '')) {
+    triggerHoneytokenAlert(
+      'CREDENCIAL_SENUELO_PRE_OAUTH_MOVIL',
+      `Intento pre-OAuth con DNI señuelo '${cleanDni}'`
+    );
+    return { ok: false, existe: false, error: 'El DNI ingresado no se encuentra registrado en Supabase.' };
+  }
+
+  try {
+    if (isVercelCookieMode()) {
+      const res = await callAuthOtp({ action: 'oauth_check_dni', dni: cleanDni });
+      if (res?.error_conexion) return { ok: false, error: res.error_conexion };
+      const existe = Boolean(res?.existe || res?.en_padron || res?.ya_registrado);
+      return existe
+        ? { ok: true, existe: true }
+        : { ok: false, existe: false, error: `El DNI ${cleanDni} no figura en la base de datos de Supabase.` };
+    }
+
+    const base = SUPABASE_URL.replace(/\/$/, '');
+    const resp = await fetch(`${base}/rest/v1/rpc/verificar_dni_pre_oauth`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+      body: JSON.stringify({ p_dni: cleanDni }),
+    });
+    if (!resp.ok) {
+      return {
+        ok: false,
+        error: 'No se pudo verificar el DNI en Supabase (verifique supabase_oauth_setup.sql).',
+      };
+    }
+    const data = await resp.json();
+    const existe = Boolean(data?.existe || data?.en_padron || data?.ya_registrado);
+    if (!existe) {
+      return {
+        ok: false,
+        existe: false,
+        error: `El DNI ${cleanDni} no figura en la base de datos de Supabase (padrón oficial).`,
+      };
+    }
+    return { ok: true, existe: true };
+  } catch (err) {
+    return { ok: false, error: `Error de red verificando DNI: ${err?.message || 'Verifique internet'}` };
+  }
+}
+
+export async function checkOAuthProviderEnabled(provider) {
+  const prov = String(provider || '').trim().toLowerCase();
+  const label = prov === 'google' ? 'Google' : 'GitHub';
+  try {
+    const resp = await fetch(`${SUPABASE_URL.replace(/\/$/, '')}/auth/v1/settings`, {
+      headers: { apikey: SUPABASE_ANON_KEY, Accept: 'application/json' },
+    });
+    if (!resp.ok) return { ok: true, habilitado: true };
+    const data = await resp.json();
+    if (data?.external && data.external[prov] === false) {
+      return {
+        ok: false,
+        habilitado: false,
+        error: `El proveedor ${label} no está habilitado en Supabase (Authentication → Providers → ${label}).`,
+      };
+    }
+    return { ok: true, habilitado: true };
+  } catch {
+    return { ok: true, habilitado: true };
+  }
+}
+
+export async function startSocialOAuthFlow(provider, dni) {
+  const prov = String(provider || '').trim().toLowerCase();
+  if (prov !== 'google' && prov !== 'github') {
+    return { ok: false, error: 'Proveedor OAuth no soportado.' };
+  }
+
+  const dniChk = await verifyDniPreOAuth(dni);
+  if (!dniChk.ok) return dniChk;
+
+  const provChk = await checkOAuthProviderEnabled(prov);
+  if (!provChk.ok) return provChk;
+
+  const { verifier, challenge } = await generatePkcePair();
+  const isAndroid = isNativeAndroidPlatform();
+  const redirectTo = isAndroid
+    ? ANDROID_OAUTH_REDIRECT_URI
+    : `${window.location.origin}${window.location.pathname}`;
+
+  savePendingOAuthState({ dni: String(dni).trim(), verifier, provider: prov });
+
+  const params = new URLSearchParams({
+    provider: prov,
+    redirect_to: redirectTo,
+    code_challenge: challenge,
+    code_challenge_method: 's256',
+  });
+  if (prov === 'google') params.set('prompt', 'select_account');
+
+  const authUrl = `${SUPABASE_URL.replace(/\/$/, '')}/auth/v1/authorize?${params.toString()}`;
+
+  if (isAndroid) {
+    const res = await SessionVault.openExternalAuthUrl({ url: authUrl });
+    if (!res?.ok) {
+      cancelPendingSocialOAuth();
+      return { ok: false, error: res?.error || 'No se pudo abrir el navegador seguro en Android.' };
+    }
+    return { ok: true, waitingExternalBrowser: true };
+  }
+
+  window.location.assign(authUrl);
+  return { ok: true, redirectingWeb: true };
+}
+
+export async function consumeAndroidPendingOAuthUrl() {
+  if (!isNativeAndroidPlatform()) return '';
+  try {
+    const res = await SessionVault.consumePendingOAuthUrl();
+    return res?.ok && res?.url ? String(res.url) : '';
+  } catch {
+    return '';
+  }
+}
+
+export async function completeSocialOAuthCallback(rawCallbackUrl, explicitDni = '') {
+  const pending = loadPendingOAuthState();
+  const targetUrl = String(rawCallbackUrl || '').trim();
+  if (!targetUrl) return null;
+
+  let qsParams;
+  let hashParams;
+  try {
+    const u = new URL(targetUrl);
+    qsParams = u.searchParams;
+    hashParams = new URLSearchParams(u.hash ? u.hash.slice(1) : '');
+  } catch {
+    return null;
+  }
+
+  const err = qsParams.get('error') || hashParams.get('error') || '';
+  const errDesc = qsParams.get('error_description') || hashParams.get('error_description') || '';
+  const code = qsParams.get('code') || hashParams.get('code') || '';
+  let accessToken = qsParams.get('access_token') || hashParams.get('access_token') || '';
+
+  if (!err && !code && !accessToken) {
+    return null;
+  }
+
+  if (!isNativeAndroidPlatform() && typeof window !== 'undefined' && window.history?.replaceState) {
+    window.history.replaceState(null, '', window.location.pathname);
+  }
+
+  if (err) {
+    cancelPendingSocialOAuth();
+    return { ok: false, error: errDesc || err || 'Autorización OAuth cancelada.' };
+  }
+
+  const base = SUPABASE_URL.replace(/\/$/, '');
+  let userObj = null;
+
+  try {
+    if (code) {
+      const verifier = String(pending?.verifier || '').trim();
+      if (!verifier) {
+        cancelPendingSocialOAuth();
+        return { ok: false, error: 'La sesión PKCE expiró. Inicie nuevamente con su DNI.' };
+      }
+      const tokResp = await fetch(`${base}/auth/v1/token?grant_type=pkce`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY },
+        body: JSON.stringify({ auth_code: code, code_verifier: verifier }),
+      });
+      const tokJson = await tokResp.json().catch(() => ({}));
+      if (!tokResp.ok || !tokJson?.access_token) {
+        cancelPendingSocialOAuth();
+        return {
+          ok: false,
+          error: tokJson?.msg || tokJson?.error_description || 'No se pudo canjear el código OAuth.',
+        };
+      }
+      accessToken = String(tokJson.access_token);
+      userObj = tokJson.user || null;
+    }
+
+    if (!userObj && accessToken) {
+      const uResp = await fetch(`${base}/auth/v1/user`, {
+        headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${accessToken}` },
+      });
+      if (uResp.ok) userObj = await uResp.json();
+    }
+
+    const meta = userObj?.user_metadata || {};
+    const email = String(userObj?.email || meta.email || '').trim().toLowerCase();
+    const nickname = String(
+      meta.full_name || meta.name || meta.preferred_username || meta.user_name || email.split('@')[0] || 'Operador'
+    )
+      .trim()
+      .slice(0, 40);
+
+    const dniToSync = String(explicitDni || pending?.dni || '').trim();
+    const dev = await getDeviceFingerprint();
+
+    let syncData;
+    if (isVercelCookieMode()) {
+      syncData = await callAuthOtp({
+        action: 'oauth_sync',
+        oauth_access_token: accessToken,
+        p_dni: dniToSync || null,
+        p_nickname: nickname,
+        p_device_hash: dev.deviceHash,
+        p_device_label: dev.deviceLabel,
+      });
+    } else {
+      const syncResp = await fetch(`${base}/rest/v1/rpc/oauth_sync_operador`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          p_dni: dniToSync || null,
+          p_nickname: nickname,
+          p_device_hash: dev.deviceHash,
+          p_device_label: dev.deviceLabel,
+        }),
+      });
+      syncData = await syncResp.json().catch(() => ({ ok: false, error: `HTTP ${syncResp.status}` }));
+    }
+
+    cancelPendingSocialOAuth();
+
+    if (syncData?.ok && syncData?.status === 'needs_dni') {
+      return {
+        ok: true,
+        needsDni: true,
+        oauthAccessToken: accessToken,
+        correo: email,
+        nickname,
+        provider: pending?.provider || 'google',
+      };
+    }
+
+    if (syncData?.ok && syncData?.status === 'authenticated' && syncData?.user) {
+      if (syncData.session_token) {
+        saveSessionToken(syncData.session_token, dev.deviceHash);
+      }
+      return {
+        ok: true,
+        authenticated: true,
+        user: syncData.user,
+        sessionToken: syncData.session_token || '',
+        deviceHash: dev.deviceHash,
+      };
+    }
+
+    return {
+      ok: false,
+      error: syncData?.error || syncData?.error_conexion || 'No se pudo vincular la cuenta social con el DNI.',
+    };
+  } catch (err) {
+    cancelPendingSocialOAuth();
+    return { ok: false, error: `Error completando OAuth: ${err?.message || 'Verifique internet'}` };
+  }
+}

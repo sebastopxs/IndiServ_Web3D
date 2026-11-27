@@ -2,7 +2,7 @@
  * MobileAuthView.jsx — Pantalla de inicio de sesión y registro validado contra padrón UNMSM en Supabase.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { POLITICA_PRIVACIDAD_TEXTO, VERSION_POLITICA } from '../utils/legalPolicy';
 import {
   checkLoginRateLimit,
@@ -13,6 +13,10 @@ import {
   getDeviceFingerprint,
   saveSessionToken,
   callAuthOtp,
+  startSocialOAuthFlow,
+  cancelPendingSocialOAuth,
+  completeSocialOAuthCallback,
+  consumeAndroidPendingOAuthUrl,
 } from '../utils/security';
 import {
   ShieldCheck,
@@ -35,6 +39,37 @@ import {
   authenticateBiometricLogin,
   disableBiometricLogin,
 } from '../utils/biometric';
+
+function GoogleIconSvg() {
+  return (
+    <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        fill="#4285F4"
+        d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47c-.29 1.48-1.14 2.73-2.4 3.58v2.98h3.86c2.26-2.09 3.56-5.17 3.56-8.8z"
+      />
+      <path
+        fill="#34A853"
+        d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-2.98c-1.08.72-2.45 1.16-4.07 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.07C3.26 21.3 7.31 24 12 24z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M5.28 14.31c-.24-.72-.38-1.49-.38-2.31s.14-1.59.38-2.31V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.07z"
+      />
+      <path
+        fill="#EA4335"
+        d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.07c.95-2.85 3.6-4.94 6.72-4.94z"
+      />
+    </svg>
+  );
+}
+
+function GitHubIconSvg() {
+  return (
+    <svg className="w-4 h-4 shrink-0 fill-white" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 .3a12 12 0 0 0-3.79 23.39c.6.11.82-.26.82-.58v-2.05c-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.21.08 1.85 1.24 1.85 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.02 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.63-5.48 5.92.43.37.81 1.1.81 2.22v3.29c0 .32.22.7.82.58A12 12 0 0 0 12 .3z" />
+    </svg>
+  );
+}
 
 export default function MobileAuthView({ onAuthenticated, onGuestDemo, initialNotice = '' }) {
   const [mode, setMode] = useState('login');
@@ -61,6 +96,8 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo, initialNo
   });
   const [saveBiometricOptIn, setSaveBiometricOptIn] = useState(false);
   const [bioBusy, setBioBusy] = useState(false);
+  const [oauthWaitingProvider, setOauthWaitingProvider] = useState('');
+  const dniInputRef = useRef(null);
 
   useEffect(() => {
     let active = true;
@@ -73,8 +110,103 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo, initialNo
   }, []);
 
   useEffect(() => {
-    if (initialNotice) setSuccess(initialNotice);
+    if (initialNotice) {
+      if (initialNotice.startsWith('Cuenta eliminada')) {
+        setSuccess(initialNotice);
+      } else {
+        setError(initialNotice);
+      }
+    }
   }, [initialNotice]);
+
+  useEffect(() => {
+    let mounted = true;
+    const checkResumeOAuth = async () => {
+      const pendingUrl = await consumeAndroidPendingOAuthUrl();
+      if (!pendingUrl || !mounted) return;
+      setLoading(true);
+      const out = await completeSocialOAuthCallback(pendingUrl, dni.trim());
+      if (!mounted) return;
+      setLoading(false);
+      setOauthWaitingProvider('');
+      if (out?.ok && out.authenticated && out.user) {
+        resetLoginRateLimit();
+        onAuthenticated(out.user);
+      } else if (out && !out.ok && out.error) {
+        setError(out.error);
+      }
+    };
+
+    const prevDispatcher = window.__indiservDispatchOAuthUrl;
+    window.__indiservDispatchOAuthUrl = async (incomingUrl) => {
+      if (!mounted) return;
+      setLoading(true);
+      const out = await completeSocialOAuthCallback(incomingUrl, dni.trim());
+      if (!mounted) return;
+      setLoading(false);
+      setOauthWaitingProvider('');
+      if (out?.ok && out.authenticated && out.user) {
+        resetLoginRateLimit();
+        onAuthenticated(out.user);
+      } else if (out && !out.ok && out.error) {
+        setError(out.error);
+      }
+    };
+
+    const onVis = () => {
+      if (document.visibilityState === 'visible') {
+        checkResumeOAuth();
+      }
+    };
+    document.addEventListener('visibilitychange', onVis);
+    checkResumeOAuth();
+
+    return () => {
+      mounted = false;
+      document.removeEventListener('visibilitychange', onVis);
+      if (prevDispatcher) {
+        window.__indiservDispatchOAuthUrl = prevDispatcher;
+      }
+    };
+  }, [dni, onAuthenticated]);
+
+  const handleSocialOAuth = async (provider) => {
+    if (loading || bioBusy || oauthWaitingProvider) return;
+    setError('');
+    setSuccess('');
+
+    const cleanDni = dni.trim();
+    if (!/^\d{8}$/.test(cleanDni)) {
+      setError('Ingrese primero su DNI de 8 dígitos arriba para verificarlo en Supabase.');
+      dniInputRef.current?.focus();
+      return;
+    }
+
+    const rate = checkLoginRateLimit();
+    if (!rate.allowed) {
+      setError(`⏳ Demasiados intentos fallidos. Espere ${rate.waitSeconds} s.`);
+      return;
+    }
+
+    setOauthWaitingProvider(provider);
+    try {
+      const res = await startSocialOAuthFlow(provider, cleanDni);
+      if (!res?.ok) {
+        setOauthWaitingProvider('');
+        setError(res?.error || 'No se pudo iniciar la autenticación social.');
+      }
+    } catch (err) {
+      setOauthWaitingProvider('');
+      setError(`Error iniciando OAuth: ${err?.message || 'Verifique internet'}`);
+    }
+  };
+
+  const handleCancelSocialOAuth = () => {
+    cancelPendingSocialOAuth();
+    setOauthWaitingProvider('');
+    setError('');
+    setSuccess('Autorización en navegador cancelada.');
+  };
 
   const maybeEnrollBiometric = async (userObj, sessionToken, deviceHash, enabledFlag) => {
     if (!enabledFlag || !bioStatus.available || !sessionToken || !userObj?.dni) return;
@@ -704,6 +836,7 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo, initialNo
               DNI del Operador (8 dígitos)
             </label>
             <input
+              ref={dniInputRef}
               type="text"
               inputMode="numeric"
               value={dni}
@@ -833,6 +966,57 @@ export default function MobileAuthView({ onAuthenticated, onGuestDemo, initialNo
               ? 'Enviar Código de Recuperación'
               : 'Registrar Cuenta en la Nube'}
           </button>
+
+          {mode !== 'forgot' && (
+            <div className="space-y-2.5 pt-1">
+              <div className="flex items-center gap-2 text-[10px] text-slate-500 uppercase tracking-wider">
+                <div className="h-px flex-1 bg-slate-800" />
+                <span>o ingresa tu DNI y continúa con</span>
+                <div className="h-px flex-1 bg-slate-800" />
+              </div>
+
+              {oauthWaitingProvider ? (
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    disabled
+                    className="w-full py-2.5 px-4 rounded-xl bg-[#121928] border border-slate-700 text-slate-200 text-xs font-semibold flex items-center justify-center gap-2.5 opacity-80"
+                  >
+                    {oauthWaitingProvider === 'google' ? <GoogleIconSvg /> : <GitHubIconSvg />}
+                    <span>Esperando autorización en el navegador...</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCancelSocialOAuth}
+                    className="w-full py-2.5 px-4 rounded-xl bg-rose-950/60 hover:bg-rose-900/60 border border-rose-700/60 text-rose-200 text-xs font-semibold transition-colors"
+                  >
+                    ✖ Cancelar espera en navegador
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    disabled={loading || bioBusy}
+                    onClick={() => handleSocialOAuth('google')}
+                    className="w-full py-2.5 px-4 rounded-xl bg-[#121928] hover:bg-[#1c273d] border border-slate-700 hover:border-blue-400/70 text-slate-100 text-xs font-semibold flex items-center justify-center gap-2.5 transition-colors disabled:opacity-50"
+                  >
+                    <GoogleIconSvg />
+                    <span>Continuar con Google</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={loading || bioBusy}
+                    onClick={() => handleSocialOAuth('github')}
+                    className="w-full py-2.5 px-4 rounded-xl bg-[#121928] hover:bg-[#1c273d] border border-slate-700 hover:border-slate-300/70 text-slate-100 text-xs font-semibold flex items-center justify-center gap-2.5 transition-colors disabled:opacity-50"
+                  >
+                    <GitHubIconSvg />
+                    <span>Continuar con GitHub</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           <button
             type="button"

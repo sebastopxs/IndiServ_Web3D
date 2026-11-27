@@ -1,7 +1,9 @@
 package com.indiserv.analytica;
 
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.net.Uri;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
 import android.util.Base64;
@@ -35,6 +37,11 @@ public class SessionVaultPlugin extends Plugin {
     private static final String KEY_ENC_IV = "enc_iv";
     private static final String TRANSFORMATION = "AES/GCM/NoPadding";
     private static final int GCM_TAG_BITS = 128;
+    private static volatile String pendingOAuthUrl = null;
+
+    public static void setPendingOAuthUrl(String url) {
+        pendingOAuthUrl = url;
+    }
 
     private SharedPreferences getVaultPrefs() {
         return getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
@@ -144,6 +151,39 @@ public class SessionVaultPlugin extends Plugin {
         getVaultPrefs().edit().clear().apply();
         JSObject ret = new JSObject();
         ret.put("ok", true);
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void openExternalAuthUrl(PluginCall call) {
+        String rawUrl = call.getString("url", "").trim();
+        JSObject ret = new JSObject();
+        if (!rawUrl.startsWith("https://pvrfnvrxaxulcxacdino.supabase.co/auth/v1/authorize")) {
+            ret.put("ok", false);
+            ret.put("error", "URL de autorización fuera de lista blanca.");
+            call.resolve(ret);
+            return;
+        }
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(rawUrl));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+            ret.put("ok", true);
+            call.resolve(ret);
+        } catch (Exception ex) {
+            ret.put("ok", false);
+            ret.put("error", "No se pudo abrir el navegador del teléfono.");
+            call.resolve(ret);
+        }
+    }
+
+    @PluginMethod
+    public void consumePendingOAuthUrl(PluginCall call) {
+        String url = pendingOAuthUrl;
+        pendingOAuthUrl = null;
+        JSObject ret = new JSObject();
+        ret.put("ok", url != null && !url.isEmpty());
+        ret.put("url", url != null ? url : "");
         call.resolve(ret);
     }
 }
